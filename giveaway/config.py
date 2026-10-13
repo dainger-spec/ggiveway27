@@ -26,6 +26,12 @@ class Config:
     webapp_url: str | None  # публичный HTTPS-адрес мини-приложения
     web_host: str
     web_port: int
+    data_dir: str = ""  # постоянная папка (на Bothost — /app/data)
+
+    @property
+    def db_in_data_dir(self) -> bool:
+        """База лежит в постоянной папке и переживёт обновление бота."""
+        return bool(self.data_dir) and Path(self.db_path).resolve().is_relative_to(Path(self.data_dir).resolve())
 
 
 def load_config() -> Config:
@@ -81,4 +87,5 @@ def load_config() -> Config:
         webapp_url=webapp_url,
         web_host=os.getenv("WEB_HOST", "").strip() or "0.0.0.0",
         web_port=web_port,
+        data_dir=str(data_dir),
     )

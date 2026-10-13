@@ -66,7 +66,7 @@ async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> No
     total = await db.count_participants()
     await bot.send_message(
         chat_id,
-        texts.admin_menu(config.giveaway_name, sponsors, total, config.webapp_url),
+        texts.admin_menu(config, sponsors, total),
         reply_markup=kb.admin_menu_kb(),
     )
 
@@ -141,7 +141,7 @@ async def menu(cb: CallbackQuery, state: FSMContext, db: Database, config: Confi
     await state.clear()
     sponsors = await db.get_sponsors()
     total = await db.count_participants()
-    await show(cb, texts.admin_menu(config.giveaway_name, sponsors, total, config.webapp_url), kb.admin_menu_kb())
+    await show(cb, texts.admin_menu(config, sponsors, total), kb.admin_menu_kb())
     await cb.answer()
 
 

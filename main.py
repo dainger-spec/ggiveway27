@@ -65,7 +65,10 @@ async def main() -> None:
     adopt_legacy_db(config.db_path)
     db = Database(config.db_path)
     await db.connect()
-    log.info("База данных: %s", config.db_path)
+    sponsors, participants = await db.get_sponsors(), await db.count_participants()
+    log.info("База данных: %s — спонсоров: %d, участников: %d", config.db_path, len(sponsors), participants)
+    if not config.db_in_data_dir:
+        log.warning("База лежит вне папки %s — на Bothost она пропадёт при обновлении бота!", config.data_dir)
 
     bot = Bot(
         config.bot_token,

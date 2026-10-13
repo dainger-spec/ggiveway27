@@ -1,6 +1,7 @@
 from collections.abc import Iterable
 from html import escape
 
+from .config import Config
 from .database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Participant, Sponsor
 from .media import Background
 from .prizes import total_prize
@@ -75,17 +76,21 @@ def already_participant(number: int, giveaway: str) -> str:
 # ---------- Админка ----------
 
 
-def admin_menu(giveaway: str, sponsors: list[Sponsor], participants: int, webapp_url: str | None) -> str:
+def admin_menu(config: Config, sponsors: list[Sponsor], participants: int) -> str:
     counts = {kind: sum(1 for s in sponsors if s.kind == kind) for kind in KIND_ICONS}
     by_kind = " · ".join(f"{KIND_ICONS[k]} {n}" for k, n in counts.items())
     prize = total_prize(s.amount for s in sponsors)
-    webapp = "✅ подключено" if webapp_url else "⚠️ не подключено (нужен WEBAPP_URL)"
+    webapp = "✅ подключено" if config.webapp_url else "⚠️ не подключено (нужен WEBAPP_URL)"
+    storage = (
+        "✅ сохраняется при обновлениях" if config.db_in_data_dir else "⚠️ вне папки data — пропадёт при обновлении"
+    )
     return (
-        f"⚙️ <b>Админ-панель — {escape(giveaway)}</b>\n\n"
+        f"⚙️ <b>Админ-панель — {escape(config.giveaway_name)}</b>\n\n"
         f"Спонсоров: <b>{len(sponsors)}</b> ({by_kind})\n"
         f"Призовой фонд: <b>{escape(prize) if prize else 'суммы не указаны'}</b>\n"
         f"Участников: <b>{participants}</b>\n"
-        f"Мини-приложение: {webapp}"
+        f"Мини-приложение: {webapp}\n"
+        f"База: <code>{escape(config.db_path)}</code> {storage}"
     )
 
 
