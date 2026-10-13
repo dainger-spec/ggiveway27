@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-  <title>Europe Private Giveaway</title>
+  <title>Europe New Year Giveaway</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700;800&display=swap">
@@ -19,29 +19,21 @@
   <main class="app">
     <!-- 1. Приветствие -->
     <section class="screen screen--welcome is-active" id="screenWelcome">
-      <header class="brand">
-        <span class="brand__stars" data-stars="12" data-size="22"></span>
-        <span class="brand__name" id="brandName">Europe Private Giveaway</span>
-      </header>
+      <div class="welcome__center">
+        <span class="emblem" data-stars="12" data-size="150" aria-hidden="true"></span>
+        <h1 class="welcome__title" id="giveawayTitle">Europe New Year Giveaway</h1>
 
-      <div class="hero">
-        <p class="hero__hello"><span id="helloWord">Привет</span>, <span id="userName">друг</span>!</p>
-        <h1 class="hero__title" id="heroTitle">Добро пожаловать в&nbsp;розыгрыш</h1>
-      </div>
-
-      <div class="prize" id="prize">
-        <span class="prize__ring" data-stars="12" data-size="280"></span>
-        <div class="prize__inner">
+        <div class="prize" id="prize">
           <span class="prize__label">Общий призовой фонд</span>
           <span class="prize__value is-loading" id="prizeTotal">&nbsp;</span>
         </div>
-      </div>
 
-      <p class="stats" id="stats">&nbsp;</p>
+        <p class="stats" id="stats">&nbsp;</p>
 
-      <div class="ticket" id="myTicket" hidden>
-        <span class="ticket__label">Твой номер участника</span>
-        <span class="ticket__number" id="myTicketNumber"></span>
+        <div class="ticket" id="myTicket" hidden>
+          <span class="ticket__label">Твой номер участника</span>
+          <span class="ticket__number" id="myTicketNumber"></span>
+        </div>
       </div>
 
       <div class="welcome__actions">
@@ -179,9 +171,10 @@
 
       function drawStars(node) {
         const count = Number(node.dataset.stars) || 12;
-        const small = (Number(node.dataset.size) || 100) < 60;
+        const size = Number(node.dataset.size) || 100;
+        const small = size < 60;
         const radius = small ? 36 : 44;
-        const scale = small ? 9 : 3.4;
+        const scale = small ? 9 : size < 200 ? 4.6 : 3.4;
         let paths = "";
         for (let i = 0; i < count; i += 1) {
           const angle = (i / count) * Math.PI * 2;
@@ -306,15 +299,7 @@
 
       function renderWelcome() {
         document.title = state.giveaway;
-        $("brandName").textContent = state.giveaway;
-        $("userName").textContent = state.user.first_name || "друг";
-        const newYear = Boolean(state.theme && state.theme.new_year);
-        $("helloWord").textContent = newYear
-          ? new Date().getMonth() === 11
-            ? "С наступающим"
-            : "С Новым годом"
-          : "Привет";
-        $("heroTitle").textContent = newYear ? "Новогодний розыгрыш" : "Добро пожаловать в\u00a0розыгрыш";
+        $("giveawayTitle").textContent = state.giveaway;
 
         const prize = $("prizeTotal");
         prize.classList.remove("is-loading", "is-multi", "is-text");

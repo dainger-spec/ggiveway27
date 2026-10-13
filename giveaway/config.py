@@ -82,7 +82,7 @@ def load_config() -> Config:
         bot_token=token,
         admin_ids=admin_ids,
         db_path=str(db_path),
-        giveaway_name=os.getenv("GIVEAWAY_NAME", "").strip() or "Europe Private Giveaway",
+        giveaway_name=os.getenv("GIVEAWAY_NAME", "").strip() or "Europe New Year Giveaway",
         media_dir=str(media_dir),
         webapp_url=webapp_url,
         web_host=os.getenv("WEB_HOST", "").strip() or "0.0.0.0",
