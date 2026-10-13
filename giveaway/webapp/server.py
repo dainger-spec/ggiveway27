@@ -51,7 +51,7 @@ async def _missing_ids(app: web.Application, user_id: int, sponsors: list[Sponso
     hit = cache.get(user_id)
     if hit and not fresh and now - hit[0] < CHECK_CACHE_SECONDS:
         return hit[1]
-    missing = {s.id for s in await find_missing(app[BOT], sponsors, user_id)}
+    missing = {s.id for s in await find_missing(app[BOT], app[DB], sponsors, user_id)}
     if len(cache) > 50_000:
         cache.clear()
     cache[user_id] = (now, missing)
@@ -83,6 +83,9 @@ async def _state(app: web.Application, user: WebAppUser, *, fresh: bool = False)
                 "verifiable": s.checkable,
                 "done": s.id not in missing if s.checkable else None,
                 "avatar": f"media/avatar/{s.id}" if s.checkable else None,
+                "background": (
+                    {"kind": s.bg_kind, "url": f"media/sponsor/{s.id}?v={s.bg_file}"} if s.bg_file else None
+                ),
             }
             for s in sponsors
         ],
@@ -145,6 +148,17 @@ async def media_avatar(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=3600"})
 
 
+async def media_sponsor_background(request: web.Request) -> web.StreamResponse:
+    try:
+        sponsor = await request.app[DB].get_sponsor(int(request.match_info["sponsor_id"]))
+    except ValueError:
+        sponsor = None
+    path = media.sponsor_background_path(request.app[CONFIG].media_dir, sponsor) if sponsor else None
+    if path is None:
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 async def health(_: web.Request) -> web.Response:
     return web.Response(text="ok")
 
@@ -161,6 +175,7 @@ def create_app(bot: Bot, db: Database, config: Config) -> web.Application:
     app.router.add_post("/api/join", api_join)
     app.router.add_get("/media/background", media_background)
     app.router.add_get("/media/avatar/{sponsor_id}", media_avatar)
+    app.router.add_get("/media/sponsor/{sponsor_id}", media_sponsor_background)
     app.router.add_static("/static/", STATIC_DIR)
     return app
 

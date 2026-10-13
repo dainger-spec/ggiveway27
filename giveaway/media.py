@@ -63,36 +63,78 @@ def _background_source(message: Message) -> tuple[str, int | None, str, str] | N
     return None
 
 
-async def save_background(bot: Bot, db: Database, media_dir: str, message: Message) -> str | None:
-    """Сохраняет присланный файл как фон. Возвращает текст ошибки или None."""
+class MediaError(Exception):
+    """Понятная админу причина, почему файл не подошёл."""
+
+
+async def download_media(bot: Bot, media_dir: str, message: Message, prefix: str) -> tuple[str, str]:
+    """Скачивает картинку, GIF или видео из сообщения. Возвращает (image|video, имя файла)."""
     source = _background_source(message)
     if source is None:
-        return "Пришлите картинку, GIF или видео (MP4)."
+        raise MediaError("Пришлите картинку, GIF или видео (MP4).")
     file_id, size, kind, ext = source
     if size and size > MAX_DOWNLOAD_BYTES:
-        return "Файл больше 20 МБ — Telegram не даёт ботам скачивать такие файлы. Сожмите его и пришлите снова."
+        raise MediaError(
+            "Файл больше 20 МБ — Telegram не даёт ботам скачивать такие файлы. Сожмите его и пришлите снова."
+        )
 
     folder = Path(media_dir)
     folder.mkdir(parents=True, exist_ok=True)
-    version = str(int(time.time()))
-    name = f"background_{version}{ext}"
+    name = f"{prefix}_{time.time_ns() // 1_000_000}{ext}"
     try:
         await bot.download(file_id, destination=folder / name)
     except TelegramAPIError as e:
-        return f"Не удалось скачать файл: {e.message}"
+        raise MediaError(f"Не удалось скачать файл: {e.message}") from None
+    return kind, name
 
+
+def _remove_file(media_dir: str, name: str | None) -> None:
+    if name:
+        (Path(media_dir) / name).unlink(missing_ok=True)
+
+
+async def save_background(bot: Bot, db: Database, media_dir: str, message: Message) -> str | None:
+    """Сохраняет фон всего мини-приложения. Возвращает текст ошибки или None."""
+    try:
+        kind, name = await download_media(bot, media_dir, message, "background")
+    except MediaError as e:
+        return str(e)
     old = await db.get_setting(BG_FILE)
-    await db.set_settings({BG_KIND: kind, BG_FILE: name, BG_VERSION: version})
-    if old and old != name:
-        (folder / old).unlink(missing_ok=True)
+    await db.set_settings({BG_KIND: kind, BG_FILE: name, BG_VERSION: name.rsplit("_", 1)[-1].split(".")[0]})
+    if old != name:
+        _remove_file(media_dir, old)
     return None
+
+
+async def save_sponsor_background(
+    bot: Bot, db: Database, media_dir: str, sponsor: Sponsor, message: Message
+) -> str | None:
+    """Сохраняет фон капсулы спонсора. Возвращает текст ошибки или None."""
+    try:
+        kind, name = await download_media(bot, media_dir, message, f"sponsor{sponsor.id}")
+    except MediaError as e:
+        return str(e)
+    await db.set_sponsor_background(sponsor.id, kind, name)
+    _remove_file(media_dir, sponsor.bg_file)
+    return None
+
+
+async def remove_sponsor_background(db: Database, media_dir: str, sponsor: Sponsor) -> None:
+    await db.set_sponsor_background(sponsor.id, None, None)
+    _remove_file(media_dir, sponsor.bg_file)
+
+
+def sponsor_background_path(media_dir: str, sponsor: Sponsor) -> Path | None:
+    if not sponsor.bg_file:
+        return None
+    path = Path(media_dir) / sponsor.bg_file
+    return path if path.is_file() else None
 
 
 async def remove_background(db: Database, media_dir: str) -> None:
     name = await db.get_setting(BG_FILE)
     await db.delete_settings(BG_KIND, BG_FILE, BG_VERSION)
-    if name:
-        (Path(media_dir) / name).unlink(missing_ok=True)
+    _remove_file(media_dir, name)
 
 
 def _fresh(path: Path) -> bool:

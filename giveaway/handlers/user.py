@@ -69,7 +69,7 @@ async def check_subscriptions(cb: CallbackQuery, bot: Bot, db: Database, config:
         await cb.answer()
         return
 
-    missing = await find_missing(bot, sponsors, user.id)
+    missing = await find_missing(bot, db, sponsors, user.id)
     if missing:
         await show(cb, texts.missing(missing), sponsors_kb(missing, config.webapp_url))
         await cb.answer("Ещё не все условия выполнены")

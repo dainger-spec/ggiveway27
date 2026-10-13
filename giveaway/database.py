@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS sponsors (
     url        TEXT    NOT NULL,
     chat_id    INTEGER,
     amount     TEXT,
+    bg_kind    TEXT,  -- фон капсулы в мини-приложении: image | video
+    bg_file    TEXT,
     created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -32,6 +34,14 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+-- Заявки на вступление в чаты/каналы по заявкам: поданная заявка засчитывается как выполненное условие
+CREATE TABLE IF NOT EXISTS join_requests (
+    chat_id    INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, user_id)
+);
+
 -- Каналы и чаты, где бот стал администратором (нужны, чтобы узнать приватный канал по ссылке-приглашению)
 CREATE TABLE IF NOT EXISTS known_chats (
     chat_id    INTEGER PRIMARY KEY,
@@ -41,6 +51,7 @@ CREATE TABLE IF NOT EXISTS known_chats (
 );
 """
 
+_SPONSOR_COLUMNS = "id, kind, title, url, chat_id, amount, bg_kind, bg_file"
 # Каналы, затем чаты, затем боты; внутри группы — в порядке добавления.
 _SPONSOR_ORDER = "CASE kind WHEN 'channel' THEN 0 WHEN 'chat' THEN 1 ELSE 2 END, id"
 
@@ -53,6 +64,8 @@ class Sponsor:
     url: str
     chat_id: int | None
     amount: str | None
+    bg_kind: str | None = None  # фон капсулы: image | video
+    bg_file: str | None = None
 
     @property
     def checkable(self) -> bool:
@@ -86,7 +99,16 @@ class Database:
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.executescript(SCHEMA)
+        await self._migrate()
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Добавляет новые колонки в базу, созданную старой версией бота."""
+        async with self.conn.execute("PRAGMA table_info(sponsors)") as cur:
+            columns = {row["name"] for row in await cur.fetchall()}
+        for column in ("bg_kind", "bg_file"):
+            if column not in columns:
+                await self.conn.execute(f"ALTER TABLE sponsors ADD COLUMN {column} TEXT")
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -104,15 +126,13 @@ class Database:
         return cur.lastrowid
 
     async def get_sponsors(self) -> list[Sponsor]:
-        async with self.conn.execute(
-            f"SELECT id, kind, title, url, chat_id, amount FROM sponsors ORDER BY {_SPONSOR_ORDER}"
-        ) as cur:
+        async with self.conn.execute(f"SELECT {_SPONSOR_COLUMNS} FROM sponsors ORDER BY {_SPONSOR_ORDER}") as cur:
             rows = await cur.fetchall()
         return [Sponsor(**dict(row)) for row in rows]
 
     async def get_sponsor(self, sponsor_id: int) -> Sponsor | None:
         async with self.conn.execute(
-            "SELECT id, kind, title, url, chat_id, amount FROM sponsors WHERE id = ?",
+            f"SELECT {_SPONSOR_COLUMNS} FROM sponsors WHERE id = ?",
             (sponsor_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -127,10 +147,26 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
+    async def set_sponsor_background(self, sponsor_id: int, kind: str | None, file: str | None) -> None:
+        await self.conn.execute("UPDATE sponsors SET bg_kind = ?, bg_file = ? WHERE id = ?", (kind, file, sponsor_id))
+        await self.conn.commit()
+
     async def delete_sponsor(self, sponsor_id: int) -> bool:
         cur = await self.conn.execute("DELETE FROM sponsors WHERE id = ?", (sponsor_id,))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ---------- Заявки на вступление ----------
+
+    async def add_join_request(self, chat_id: int, user_id: int) -> None:
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO join_requests (chat_id, user_id) VALUES (?, ?)", (chat_id, user_id)
+        )
+        await self.conn.commit()
+
+    async def join_requested_chats(self, user_id: int) -> set[int]:
+        async with self.conn.execute("SELECT chat_id FROM join_requests WHERE user_id = ?", (user_id,)) as cur:
+            return {row["chat_id"] for row in await cur.fetchall()}
 
     # ---------- Чаты, где бот администратор ----------
 

@@ -381,9 +381,45 @@
         return li;
       }
 
+      // Свой фон капсулы (картинка, GIF или видео), который админ загружает в карточке спонсора.
+      function applyCapsuleBackground(li, bg) {
+        const key = bg ? bg.url : "";
+        if (li.dataset.bg === key) return;
+        li.dataset.bg = key;
+        li.querySelector(".capsule__bg")?.remove();
+        li.classList.toggle("has-bg", Boolean(bg));
+        if (!bg) return;
+
+        let media;
+        if (bg.kind === "video") {
+          media = document.createElement("video");
+          media.muted = true;
+          media.defaultMuted = true;
+          media.loop = true;
+          media.autoplay = true;
+          media.playsInline = true;
+          media.setAttribute("muted", "");
+          media.setAttribute("playsinline", "");
+          media.addEventListener("loadeddata", () => media.classList.add("is-ready"));
+          media.src = bg.url;
+          media.play().catch(() => {});
+        } else {
+          media = new Image();
+          media.alt = "";
+          media.decoding = "async";
+          media.onload = () => media.classList.add("is-ready");
+          media.src = bg.url;
+        }
+        const layer = el("div", "capsule__bg");
+        layer.setAttribute("aria-hidden", "true");
+        layer.append(media, el("span", "capsule__shade"));
+        li.prepend(layer);
+      }
+
       function updateCapsule(entry, s, index) {
         const { li } = entry;
         li.style.setProperty("--i", index);
+        applyCapsuleBackground(li, s.background);
         li.querySelector(".capsule__title").textContent = s.title;
 
         const meta = li.querySelector(".capsule__meta");

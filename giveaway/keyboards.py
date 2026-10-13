@@ -34,7 +34,7 @@ class PickChatCb(CallbackData, prefix="pick"):
 
 
 class SponsorCb(CallbackData, prefix="sp"):
-    action: str  # view | amount | delete | delete_ok
+    action: str  # view | amount | bg | bg_delete | delete | delete_ok
     id: int
 
 
@@ -124,12 +124,17 @@ def admin_sponsors_kb(sponsors: list[Sponsor]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def sponsor_card_kb(sponsor_id: int) -> InlineKeyboardMarkup:
+def sponsor_card_kb(sponsor_id: int, has_background: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="💰 Изменить сумму", callback_data=SponsorCb(action="amount", id=sponsor_id))
-    b.button(text="🗑 Удалить", callback_data=SponsorCb(action="delete", id=sponsor_id))
+    b.button(text="🖼 Фон капсулы", callback_data=SponsorCb(action="bg", id=sponsor_id))
+    rows = [2]
+    if has_background:
+        b.button(text="🚫 Убрать фон капсулы", callback_data=SponsorCb(action="bg_delete", id=sponsor_id))
+        rows.append(1)
+    b.button(text="🗑 Удалить спонсора", callback_data=SponsorCb(action="delete", id=sponsor_id))
     b.button(text="« К списку спонсоров", callback_data=AdminCb(action="sponsors"))
-    b.adjust(2, 1)
+    b.adjust(*rows, 1, 1)
     return b.as_markup()
 
 

@@ -120,7 +120,8 @@ def sponsors_list(sponsors: list[Sponsor]) -> str:
     )
 
 
-def sponsor_card(s: Sponsor, bot_admin: bool | None) -> str:
+def sponsor_card(s: Sponsor, rights: tuple[bool, bool] | None) -> str:
+    """rights — (бот администратор, бот получает заявки на вступление); None для ботов-спонсоров."""
     lines = [
         f"{KIND_ICONS[s.kind]} <b>{escape(s.title)}</b>",
         "",
@@ -130,14 +131,23 @@ def sponsor_card(s: Sponsor, bot_admin: bool | None) -> str:
     if s.chat_id is not None:
         lines.append(f"ID: <code>{s.chat_id}</code>")
     lines.append(f"Сумма: <b>{escape(s.amount)}</b>" if s.amount else "Сумма: не указана")
+    background = {"image": "картинка", "video": "видео / GIF"}.get(s.bg_kind or "", "")
+    lines.append(f"Фон капсулы: <b>{background}</b>" if s.bg_file else "Фон капсулы: нет")
     lines.append("")
     if s.kind == KIND_BOT:
         lines.append(
             "ℹ️ Telegram не позволяет проверить, запустил ли пользователь чужого бота, "
             "поэтому это условие показывается участникам, но не проверяется."
         )
-    elif bot_admin:
+    elif rights and rights[0]:
         lines.append("✅ Бот — администратор, подписка проверяется.")
+        if rights[1]:
+            lines.append("✅ Заявки на вступление засчитываются.")
+        else:
+            lines.append(
+                "⚠️ У бота нет права «Добавление участников» (пригласительные ссылки). Если вход по заявкам, "
+                "поданные заявки не будут засчитываться — включите это право."
+            )
     else:
         lines.append(
             "⚠️ Бот не является администратором — проверка подписки не работает, "

@@ -21,7 +21,7 @@ from aiogram.types import (
 
 from .. import keyboards as kb
 from .. import media, texts
-from ..checker import bot_is_admin, find_missing
+from ..checker import bot_is_admin, bot_rights, find_missing
 from ..config import Config
 from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Database, Sponsor
 from ..links import USERNAME, SponsorRef, parse_message
@@ -53,6 +53,10 @@ class SetBackground(StatesGroup):
     media = State()
 
 
+class SetSponsorBackground(StatesGroup):
+    media = State()
+
+
 # ---------- Вспомогательное ----------
 
 
@@ -66,9 +70,14 @@ async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> No
     )
 
 
+async def _sponsor_card(bot: Bot, sponsor: Sponsor) -> tuple[str, InlineKeyboardMarkup]:
+    rights = await bot_rights(bot, sponsor.chat_id) if sponsor.checkable else None
+    return texts.sponsor_card(sponsor, rights), kb.sponsor_card_kb(sponsor.id, bool(sponsor.bg_file))
+
+
 async def _send_sponsor_card(bot: Bot, chat_id: int, sponsor: Sponsor) -> None:
-    is_admin = await bot_is_admin(bot, sponsor.chat_id) if sponsor.checkable else None
-    await bot.send_message(chat_id, texts.sponsor_card(sponsor, is_admin), reply_markup=kb.sponsor_card_kb(sponsor.id))
+    text, markup = await _sponsor_card(bot, sponsor)
+    await bot.send_message(chat_id, text, reply_markup=markup)
 
 
 def _normalize_url(text: str) -> str | None:
@@ -137,8 +146,7 @@ async def sponsor_view(cb: CallbackQuery, callback_data: kb.SponsorCb, bot: Bot,
     if sponsor is None:
         await cb.answer("Спонсор уже удалён", show_alert=True)
         return
-    is_admin = await bot_is_admin(bot, sponsor.chat_id) if sponsor.checkable else None
-    await show(cb, texts.sponsor_card(sponsor, is_admin), kb.sponsor_card_kb(sponsor.id))
+    await show(cb, *await _sponsor_card(bot, sponsor))
     await cb.answer()
 
 
@@ -157,7 +165,10 @@ async def sponsor_delete(cb: CallbackQuery, callback_data: kb.SponsorCb, db: Dat
 
 
 @router.callback_query(kb.SponsorCb.filter(F.action == "delete_ok"))
-async def sponsor_delete_ok(cb: CallbackQuery, callback_data: kb.SponsorCb, db: Database) -> None:
+async def sponsor_delete_ok(cb: CallbackQuery, callback_data: kb.SponsorCb, db: Database, config: Config) -> None:
+    sponsor = await db.get_sponsor(callback_data.id)
+    if sponsor is not None:
+        await media.remove_sponsor_background(db, config.media_dir, sponsor)
     deleted = await db.delete_sponsor(callback_data.id)
     sponsors = await db.get_sponsors()
     await show(cb, texts.sponsors_list(sponsors), kb.admin_sponsors_kb(sponsors))
@@ -202,6 +213,59 @@ async def amount_edit_received(message: Message, state: FSMContext, bot: Bot, db
         return
     await message.answer("✅ Сумма обновлена." if amount else "✅ Сумма убрана.", reply_markup=ReplyKeyboardRemove())
     await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor_id))
+
+
+@router.callback_query(kb.SponsorCb.filter(F.action == "bg"))
+async def sponsor_bg_start(
+    cb: CallbackQuery, callback_data: kb.SponsorCb, state: FSMContext, bot: Bot, db: Database
+) -> None:
+    sponsor = await db.get_sponsor(callback_data.id)
+    if sponsor is None:
+        await cb.answer("Спонсор уже удалён", show_alert=True)
+        return
+    await state.set_state(SetSponsorBackground.media)
+    await state.update_data(sponsor_id=sponsor.id)
+    await bot.send_message(
+        cb.from_user.id,
+        f"🖼 Пришлите картинку, GIF или видео для капсулы {texts.sponsor_line(sponsor)} (до 20 МБ).\n\n"
+        "Капсула вытянутая, поэтому лучше подходит горизонтальная картинка. Слева фон затемняется, "
+        "чтобы название и сумма читались.",
+        reply_markup=kb.cancel_kb(),
+    )
+    await cb.answer()
+
+
+@router.message(SetSponsorBackground.media, not_command)
+async def sponsor_bg_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
+    sponsor = await db.get_sponsor((await state.get_data())["sponsor_id"])
+    if sponsor is None:
+        await state.clear()
+        await message.answer("Спонсор уже удалён.", reply_markup=ReplyKeyboardRemove())
+        return
+    progress = await message.answer("⏳ Загружаю…")
+    error = await media.save_sponsor_background(bot, db, config.media_dir, sponsor, message)
+    await progress.delete()
+    if error:
+        await message.answer(error)
+        return
+    await state.clear()
+    await message.answer(
+        "✅ Фон капсулы обновлён — откройте мини-приложение, чтобы посмотреть.", reply_markup=ReplyKeyboardRemove()
+    )
+    await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor.id))
+
+
+@router.callback_query(kb.SponsorCb.filter(F.action == "bg_delete"))
+async def sponsor_bg_delete(
+    cb: CallbackQuery, callback_data: kb.SponsorCb, bot: Bot, db: Database, config: Config
+) -> None:
+    sponsor = await db.get_sponsor(callback_data.id)
+    if sponsor is None:
+        await cb.answer("Спонсор уже удалён", show_alert=True)
+        return
+    await media.remove_sponsor_background(db, config.media_dir, sponsor)
+    await show(cb, *await _sponsor_card(bot, await db.get_sponsor(sponsor.id)))
+    await cb.answer("Фон капсулы убран")
 
 
 # ---------- Добавление спонсора ----------
@@ -529,7 +593,7 @@ async def recheck(cb: CallbackQuery, callback_data: kb.RecheckCb, bot: Bot, db: 
     if participant is None:
         await cb.answer("Участник не найден", show_alert=True)
         return
-    missing = await find_missing(bot, await db.get_sponsors(), participant.user_id)
+    missing = await find_missing(bot, db, await db.get_sponsors(), participant.user_id)
     checked_at = datetime.now().strftime("%H:%M:%S")
     await show(
         cb,
