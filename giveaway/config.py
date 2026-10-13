@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 # независимо от того, из какой папки хостинг запускает бота.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Админы по умолчанию — если переменная ADMIN_IDS не задана на хостинге.
+DEFAULT_ADMIN_IDS = "1457986905"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -22,15 +25,15 @@ def load_config() -> Config:
 
     token = os.getenv("BOT_TOKEN", "").strip()
     if not token:
-        raise RuntimeError("Не задан BOT_TOKEN в файле .env")
+        raise RuntimeError("Не задан BOT_TOKEN: укажите его в переменных окружения хостинга или в файле .env")
 
-    raw_admins = os.getenv("ADMIN_IDS", "").replace(" ", "")
+    raw_admins = (os.getenv("ADMIN_IDS", "").strip() or DEFAULT_ADMIN_IDS).replace(" ", "")
     try:
         admin_ids = frozenset(int(x) for x in raw_admins.split(",") if x)
     except ValueError:
         raise RuntimeError("ADMIN_IDS должен содержать числовые Telegram ID через запятую") from None
     if not admin_ids:
-        raise RuntimeError("Не задан ADMIN_IDS в файле .env")
+        raise RuntimeError("Не задан ADMIN_IDS: укажите Telegram ID админов через запятую")
 
     db_path = Path(os.getenv("DB_PATH", "").strip() or "giveaway.db")
     if not db_path.is_absolute():
