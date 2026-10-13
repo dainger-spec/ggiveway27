@@ -356,14 +356,14 @@ button:focus-visible {
   padding: 0 24px;
   border: 0;
   border-radius: var(--pill);
-  background: linear-gradient(180deg, var(--gold-hi), var(--gold));
-  color: var(--gold-ink);
+  background: linear-gradient(180deg, #ffffff, #e9edf6);
+  color: #0a0d1a;
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.01em;
   box-shadow:
-    0 12px 32px -10px rgba(255, 204, 51, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    0 12px 32px -12px rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(10, 13, 26, 0.08);
   transition:
     transform 0.15s ease,
     box-shadow 0.3s ease,
@@ -398,8 +398,8 @@ button:focus-visible {
 @keyframes ready-glow {
   50% {
     box-shadow:
-      0 12px 44px -6px rgba(255, 204, 51, 0.85),
-      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+      0 12px 44px -6px rgba(255, 255, 255, 0.7),
+      inset 0 -1px 0 rgba(10, 13, 26, 0.08);
   }
 }
 
@@ -922,63 +922,6 @@ button:focus-visible {
   background:
     radial-gradient(55% 100% at 25% 100%, rgba(234, 245, 255, 0.16), transparent 72%),
     radial-gradient(55% 100% at 80% 100%, rgba(234, 245, 255, 0.12), transparent 72%);
-}
-
-/* Гирлянда сверху */
-.garland {
-  position: fixed;
-  top: var(--safe-top);
-  right: 0;
-  left: 0;
-  z-index: 2;
-  display: none;
-  height: 44px;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.theme-new-year .garland {
-  display: block;
-}
-
-.garland svg {
-  display: block;
-}
-
-.garland .wire {
-  fill: none;
-  stroke: #1e3b2c;
-  stroke-width: 2;
-}
-
-.garland .cap {
-  fill: #50615a;
-}
-
-.garland .bulb {
-  animation: twinkle 2.4s ease-in-out infinite;
-  animation-delay: var(--d, 0s);
-}
-
-@keyframes twinkle {
-  0%,
-  100% {
-    opacity: 1;
-    filter: drop-shadow(0 0 5px currentColor);
-  }
-  50% {
-    opacity: 0.4;
-    filter: none;
-  }
-}
-
-.theme-new-year .screen--welcome,
-.theme-new-year .screen--done {
-  padding-top: calc(var(--safe-top) + 52px);
-}
-
-.theme-new-year .screen--sponsors {
-  padding-top: calc(var(--safe-top) + 46px);
 }
 
 /* Прогресс — леденец, пока не всё выполнено */
