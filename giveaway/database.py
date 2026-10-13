@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Каналы и чаты, где бот стал администратором (нужны, чтобы узнать приватный канал по ссылке-приглашению)
+CREATE TABLE IF NOT EXISTS known_chats (
+    chat_id    INTEGER PRIMARY KEY,
+    title      TEXT    NOT NULL,
+    type       TEXT    NOT NULL,
+    updated_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 # Каналы, затем чаты, затем боты; внутри группы — в порядке добавления.
@@ -123,6 +131,29 @@ class Database:
         cur = await self.conn.execute("DELETE FROM sponsors WHERE id = ?", (sponsor_id,))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ---------- Чаты, где бот администратор ----------
+
+    async def remember_chat(self, chat_id: int, title: str, chat_type: str) -> None:
+        await self.conn.execute(
+            "INSERT INTO known_chats (chat_id, title, type) VALUES (?, ?, ?) ON CONFLICT(chat_id) DO UPDATE "
+            "SET title = excluded.title, type = excluded.type, updated_at = CURRENT_TIMESTAMP",
+            (chat_id, title, chat_type),
+        )
+        await self.conn.commit()
+
+    async def forget_chat(self, chat_id: int) -> None:
+        await self.conn.execute("DELETE FROM known_chats WHERE chat_id = ?", (chat_id,))
+        await self.conn.commit()
+
+    async def known_chats_without_sponsor(self) -> list[tuple[int, str, str]]:
+        """(chat_id, title, type) чатов, где бот админ и которые ещё не добавлены в спонсоры."""
+        async with self.conn.execute(
+            "SELECT chat_id, title, type FROM known_chats "
+            "WHERE chat_id NOT IN (SELECT chat_id FROM sponsors WHERE chat_id IS NOT NULL) "
+            "ORDER BY updated_at DESC LIMIT 30"
+        ) as cur:
+            return [tuple(row) for row in await cur.fetchall()]
 
     # ---------- Настройки ----------
 

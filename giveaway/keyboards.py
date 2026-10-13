@@ -3,12 +3,13 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     KeyboardButton,
     KeyboardButtonRequestChat,
+    KeyboardButtonRequestUsers,
     ReplyKeyboardMarkup,
     WebAppInfo,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from .database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Sponsor
+from .database import KIND_CHANNEL, KIND_CHAT, Sponsor
 from .texts import KIND_ICONS
 
 CHECK_CB = "check_subs"
@@ -24,8 +25,12 @@ class AdminCb(CallbackData, prefix="adm"):
     action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete
 
 
-class KindCb(CallbackData, prefix="kind"):
+class KindCb(CallbackData, prefix="kind"):  # только чтобы старые кнопки «Канал/Чат/Бот» не зависали
     kind: str
+
+
+class PickChatCb(CallbackData, prefix="pick"):
+    chat_id: int
 
 
 class SponsorCb(CallbackData, prefix="sp"):
@@ -119,16 +124,6 @@ def admin_sponsors_kb(sponsors: list[Sponsor]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def kinds_kb() -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    b.button(text="📢 Канал", callback_data=KindCb(kind=KIND_CHANNEL))
-    b.button(text="💬 Чат", callback_data=KindCb(kind=KIND_CHAT))
-    b.button(text="🤖 Бот", callback_data=KindCb(kind=KIND_BOT))
-    b.button(text="« Назад", callback_data=AdminCb(action="sponsors"))
-    b.adjust(3, 1)
-    return b.as_markup()
-
-
 def sponsor_card_kb(sponsor_id: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="💰 Изменить сумму", callback_data=SponsorCb(action="amount", id=sponsor_id))
@@ -178,13 +173,33 @@ def cancel_kb() -> ReplyKeyboardMarkup:
     return _reply_kb([KeyboardButton(text=CANCEL_TEXT)])
 
 
-def choose_chat_kb(kind: str) -> ReplyKeyboardMarkup:
-    is_channel = kind == KIND_CHANNEL
-    button = KeyboardButton(
-        text="📢 Выбрать канал" if is_channel else "💬 Выбрать чат",
-        request_chat=KeyboardButtonRequestChat(request_id=1, chat_is_channel=is_channel),
+def choose_source_kb() -> ReplyKeyboardMarkup:
+    return _reply_kb(
+        [
+            KeyboardButton(
+                text="📢 Выбрать канал", request_chat=KeyboardButtonRequestChat(request_id=1, chat_is_channel=True)
+            ),
+            KeyboardButton(
+                text="💬 Выбрать чат", request_chat=KeyboardButtonRequestChat(request_id=2, chat_is_channel=False)
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="🤖 Выбрать бота",
+                request_users=KeyboardButtonRequestUsers(request_id=3, user_is_bot=True, request_username=True),
+            )
+        ],
+        [KeyboardButton(text=CANCEL_TEXT)],
     )
-    return _reply_kb([button], [KeyboardButton(text=CANCEL_TEXT)])
+
+
+def pick_chat_kb(chats: list[tuple[int, str, str]]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for chat_id, title, chat_type in chats:
+        icon = KIND_ICONS[KIND_CHANNEL if chat_type == "channel" else KIND_CHAT]
+        b.button(text=f"{icon} {title[:48]}", callback_data=PickChatCb(chat_id=chat_id))
+    b.adjust(1)
+    return b.as_markup()
 
 
 def url_kb(has_suggested: bool) -> ReplyKeyboardMarkup:

@@ -12,7 +12,7 @@ from aiogram.types import MenuButtonDefault, MenuButtonWebApp
 from giveaway.commands import USER_COMMANDS, set_admin_commands
 from giveaway.config import BASE_DIR, Config, load_config
 from giveaway.database import Database
-from giveaway.handlers import admin, user
+from giveaway.handlers import admin, chats, user
 from giveaway.keyboards import webapp_info
 from giveaway.webapp.server import start_web_server
 
@@ -53,7 +53,7 @@ def adopt_legacy_db(db_path: str) -> None:
 def build_dispatcher(config: Config, db: Database) -> Dispatcher:
     dp = Dispatcher(config=config, db=db)
     # Порядок важен: админские диалоги должны получать сообщения раньше пользовательских.
-    dp.include_routers(admin.router, user.router)
+    dp.include_routers(chats.router, admin.router, user.router)
     dp.startup.register(set_commands)
     return dp
 

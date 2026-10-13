@@ -16,8 +16,6 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     Message,
-    MessageOriginChannel,
-    MessageOriginChat,
     ReplyKeyboardRemove,
 )
 
@@ -25,7 +23,8 @@ from .. import keyboards as kb
 from .. import media, texts
 from ..checker import bot_is_admin, find_missing
 from ..config import Config
-from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, KINDS, Database, Sponsor
+from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Database, Sponsor
+from ..links import USERNAME, SponsorRef, parse_message
 from ..utils import IsAdmin, not_command, show
 
 router = Router(name="admin")
@@ -35,14 +34,10 @@ router.callback_query.filter(IsAdmin())
 PAGE_SIZE = 20
 AMOUNT_MAX_LEN = 32
 
-_USERNAME_RE = r"[A-Za-z][A-Za-z0-9_]{3,31}"
-_LINK_RE = re.compile(rf"(?:https?://)?(?:t\.me|telegram\.me)/({_USERNAME_RE})/?(\?\S*)?", re.I)
-
 
 class AddSponsor(StatesGroup):
-    chat = State()
+    source = State()  # ждём ссылку / @username / пересланный пост / выбор кнопкой
     url = State()
-    bot = State()
     amount = State()
 
 
@@ -76,29 +71,9 @@ async def _send_sponsor_card(bot: Bot, chat_id: int, sponsor: Sponsor) -> None:
     await bot.send_message(chat_id, texts.sponsor_card(sponsor, is_admin), reply_markup=kb.sponsor_card_kb(sponsor.id))
 
 
-def _extract_chat_ref(message: Message) -> int | str | None:
-    """Достаёт канал/чат из выбора кнопкой, пересланного поста, @username, ссылки или ID."""
-    if message.chat_shared:
-        return message.chat_shared.chat_id
-    origin = message.forward_origin
-    if isinstance(origin, MessageOriginChannel):
-        return origin.chat.id
-    if isinstance(origin, MessageOriginChat):
-        return origin.sender_chat.id
-
-    text = (message.text or "").strip()
-    if re.fullmatch(r"-?\d+", text):
-        return int(text)
-    if m := re.fullmatch(rf"@({_USERNAME_RE})", text):
-        return "@" + m.group(1)
-    if m := _LINK_RE.fullmatch(text):
-        return "@" + m.group(1)
-    return None
-
-
 def _normalize_url(text: str) -> str | None:
     text = text.strip()
-    if m := re.fullmatch(rf"@({_USERNAME_RE})", text):
+    if m := re.fullmatch(rf"@({USERNAME})", text):
         return f"https://t.me/{m.group(1)}"
     if re.fullmatch(r"(?:t\.me|telegram\.me)/\S+", text, re.I):
         return "https://" + text
@@ -107,9 +82,10 @@ def _normalize_url(text: str) -> str | None:
     return None
 
 
-async def _ask_amount(message: Message, state: FSMContext) -> None:
+async def _ask_amount(bot: Bot, chat_id: int, state: FSMContext) -> None:
     await state.set_state(AddSponsor.amount)
-    await message.answer(
+    await bot.send_message(
+        chat_id,
         "💰 Пришлите сумму, которую выделил этот спонсор (например: <code>500$</code>, "
         "<code>100 USDT</code>, <code>1000₽</code>).\n\n"
         f"Если суммы нет — нажмите «{kb.SKIP_TEXT}».",
@@ -231,104 +207,171 @@ async def amount_edit_received(message: Message, state: FSMContext, bot: Bot, db
 # ---------- Добавление спонсора ----------
 
 
+ADD_PROMPT = (
+    "➕ <b>Новый спонсор</b>\n\n"
+    "Пришлите ссылку на канал, чат или бота — я сам пойму, что это:\n"
+    "• <code>https://t.me/channel</code> или <code>@channel</code>\n"
+    "• приглашение в приватный канал: <code>https://t.me/+AbCd…</code>\n"
+    "• ссылку на любой пост, ID <code>-100…</code> или пересланный сюда пост\n"
+    "• бота: <code>@some_bot</code> или <code>https://t.me/some_bot?start=ref</code>\n\n"
+    "Или выберите кнопкой внизу. В каналах и чатах бот должен быть <b>администратором</b>, "
+    "иначе он не сможет проверять подписку."
+)
+
+
 @router.callback_query(kb.AdminCb.filter(F.action == "add"))
-async def add_start(cb: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(kb.KindCb.filter())  # кнопки «Канал/Чат/Бот» из старых сообщений
+async def add_start(cb: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await state.clear()
-    await show(cb, "➕ <b>Новый спонсор</b>\n\nЧто добавляем?", kb.kinds_kb())
+    await state.set_state(AddSponsor.source)
+    await bot.send_message(cb.from_user.id, ADD_PROMPT, reply_markup=kb.choose_source_kb())
     await cb.answer()
 
 
-@router.callback_query(kb.KindCb.filter(F.kind.in_(KINDS)))
-async def add_kind_chosen(cb: CallbackQuery, callback_data: kb.KindCb, state: FSMContext, bot: Bot) -> None:
-    kind = callback_data.kind
-    await state.update_data(kind=kind)
-
-    if kind == KIND_BOT:
-        await state.set_state(AddSponsor.bot)
-        await bot.send_message(
-            cb.from_user.id,
-            "🤖 Пришлите @username бота или ссылку на него.\n"
-            "Можно реферальную: <code>https://t.me/some_bot?start=ref123</code>",
-            reply_markup=kb.cancel_kb(),
-        )
-    else:
-        where = "канала" if kind == KIND_CHANNEL else "чата"
-        await state.set_state(AddSponsor.chat)
-        await bot.send_message(
-            cb.from_user.id,
-            f"{texts.KIND_ICONS[kind]} Сначала добавьте этого бота <b>администратором</b> {where} — "
-            "без этого он не сможет проверять подписку.\n\n"
-            f"Затем выберите {where[:-1]} кнопкой ниже, или пришлите его @username / ссылку / "
-            "ID (<code>-100…</code>), или перешлите сюда любой пост из канала.",
-            reply_markup=kb.choose_chat_kb(kind),
-        )
-    await cb.answer()
-
-
-@router.message(AddSponsor.chat, not_command)
-async def add_chat_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
-    kind = (await state.get_data())["kind"]
-    ref = _extract_chat_ref(message)
+@router.message(AddSponsor.source, not_command)
+async def add_source_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
+    ref = parse_message(message)
     if ref is None:
         await message.answer(
-            "Не получилось распознать. Воспользуйтесь кнопкой выбора, пришлите @username, "
-            "ссылку вида t.me/username или числовой ID."
+            "Не нашёл тут ссылку на канал, чат или бота. Пришлите ссылку вида <code>https://t.me/…</code> "
+            "или <code>@username</code>, либо выберите кнопкой внизу."
         )
         return
+    await _add_from_ref(message.chat.id, ref, state, bot, db, config)
 
-    try:
-        chat = await bot.get_chat(ref)
-    except TelegramAPIError:
-        await message.answer(
-            "Не удалось найти этот чат. Убедитесь, что бот добавлен туда администратором, и попробуйте ещё раз."
-        )
-        return
 
-    if kind == KIND_CHANNEL and chat.type != ChatType.CHANNEL:
-        await message.answer("Это не канал. Пришлите канал или нажмите «❌ Отмена».")
-        return
-    if kind == KIND_CHAT and chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-        await message.answer("Это не группа/чат. Пришлите чат или нажмите «❌ Отмена».")
-        return
-    if not await bot_is_admin(bot, chat.id):
-        await message.answer(
-            f"⚠️ Бот не является администратором в «{escape(chat.title or '')}». "
-            "Назначьте его администратором и пришлите чат ещё раз."
-        )
-        return
-    if await db.has_chat(chat.id):
-        await message.answer("Этот спонсор уже есть в списке.")
-        return
+@router.callback_query(kb.PickChatCb.filter())
+async def add_chat_picked(
+    cb: CallbackQuery, callback_data: kb.PickChatCb, state: FSMContext, bot: Bot, db: Database, config: Config
+) -> None:
+    await cb.answer()
+    await state.set_state(AddSponsor.source)
+    await _add_from_ref(cb.from_user.id, SponsorRef(chat_id=callback_data.chat_id), state, bot, db, config)
 
-    if chat.username:
-        suggested = f"https://t.me/{chat.username}"
-    else:
+
+async def _match_invite(bot: Bot, db: Database, invite_url: str) -> int | None:
+    """Приватный чат по ссылке-приглашению: сверяем с основной ссылкой чатов, где бот админ."""
+    code = invite_url.rsplit("+", 1)[-1]
+    for chat_id, _, _ in await db.known_chats_without_sponsor():
         try:
-            link = await bot.create_chat_invite_link(chat.id, name=config.giveaway_name[:32])
-            suggested = link.invite_link
+            chat = await bot.get_chat(chat_id)
         except TelegramAPIError:
-            suggested = chat.invite_link
+            continue
+        if chat.invite_link and chat.invite_link.rstrip("/").rsplit("+", 1)[-1].rsplit("/", 1)[-1] == code:
+            return chat_id
+    return None
 
-    await state.update_data(chat_id=chat.id, title=chat.title or str(chat.id), suggested_url=suggested)
+
+async def _add_from_ref(
+    admin_chat: int, ref: SponsorRef, state: FSMContext, bot: Bot, db: Database, config: Config
+) -> None:
+    """Определяет, канал это, чат или бот, проверяет права бота и переходит к сумме."""
+    invite_url = ref.invite_url or (await state.get_data()).get("invite_url")
+
+    if ref.invite_url and ref.chat_id is None:
+        chat_id = await _match_invite(bot, db, ref.invite_url)
+        if chat_id is None:
+            await state.update_data(invite_url=ref.invite_url)
+            known = await db.known_chats_without_sponsor()
+            how = "выберите его в списке ниже, " if known else ""
+            await bot.send_message(
+                admin_chat,
+                "🔗 Ссылку-приглашение запомнил.\n\nПо такой ссылке Telegram не даёт боту узнать, что это за "
+                f"канал, поэтому подскажите: {how}нажмите «Выбрать канал/чат» внизу или перешлите сюда "
+                "любой пост из этого канала.",
+                reply_markup=kb.pick_chat_kb(known) if known else None,
+            )
+            return
+        ref = SponsorRef(chat_id=chat_id)
+
+    chat = None
+    if not ref.is_bot:
+        try:
+            chat = await bot.get_chat(ref.chat_id if ref.chat_id is not None else f"@{ref.username}")
+        except TelegramAPIError:
+            chat = None
+
+    if chat is None or chat.type == ChatType.PRIVATE:
+        if ref.username and (ref.is_bot or ref.username.lower().endswith("bot")):
+            await _add_bot(admin_chat, ref, state, bot, db)
+        elif chat is not None:
+            await bot.send_message(admin_chat, "Это ссылка на пользователя, а не на канал, чат или бота.")
+        elif ref.username:
+            await bot.send_message(
+                admin_chat,
+                f"Не нашёл @{escape(ref.username)}. Проверьте ссылку. Если канал приватный — пришлите "
+                "ссылку-приглашение или перешлите сюда пост из него.",
+            )
+        else:
+            await bot.send_message(
+                admin_chat,
+                "Не вижу этот канал/чат. Добавьте бота туда <b>администратором</b> и пришлите ссылку ещё раз.",
+            )
+        return
+
+    kind = KIND_CHANNEL if chat.type == ChatType.CHANNEL else KIND_CHAT
+    title = chat.title or str(chat.id)
+    name = f"{texts.KIND_NAMES[kind].lower()} «{escape(title)}»"
+    if not await bot_is_admin(bot, chat.id):
+        await bot.send_message(
+            admin_chat,
+            f"⚠️ Нашёл {name}, но бот там не администратор. Назначьте его администратором и пришлите ссылку ещё раз.",
+        )
+        return
+    await db.remember_chat(chat.id, title, chat.type)
+    if await db.has_chat(chat.id):
+        await bot.send_message(admin_chat, f"{name.capitalize()} уже есть в списке спонсоров.")
+        return
+
+    await state.update_data(kind=kind, chat_id=chat.id, title=title)
+    found = f"✅ Распознал: {texts.KIND_ICONS[kind]} {name}"
+    url = invite_url or (f"https://t.me/{chat.username}" if chat.username else None)
+    if url:
+        await state.update_data(url=url)
+        await bot.send_message(admin_chat, f"{found}\nСсылка для участников: {escape(url)}")
+        await _ask_amount(bot, admin_chat, state)
+        return
+
+    # Приватный чат выбран кнопкой или переслан без ссылки — создаём приглашение сами.
+    try:
+        suggested = (await bot.create_chat_invite_link(chat.id, name=config.giveaway_name[:32])).invite_link
+    except TelegramAPIError:
+        suggested = chat.invite_link
+    await state.update_data(suggested_url=suggested)
     await state.set_state(AddSponsor.url)
-
-    found = f"✅ Найден {texts.KIND_NAMES[kind].lower()}: <b>{escape(chat.title or '')}</b>\n\n"
     if suggested:
-        await message.answer(
-            found + f"Ссылка для участников: {suggested}\n\n"
-            f"Нажмите «{kb.KEEP_URL_TEXT}» или пришлите другую ссылку (например, свою пригласительную).",
+        await bot.send_message(
+            admin_chat,
+            f"{found}\n\nСсылка для участников: {suggested}\n\n"
+            f"Нажмите «{kb.KEEP_URL_TEXT}» или пришлите свою ссылку-приглашение.",
             reply_markup=kb.url_kb(has_suggested=True),
         )
     else:
-        await message.answer(
-            found + "Не удалось получить ссылку автоматически. Пришлите ссылку-приглашение, "
+        await bot.send_message(
+            admin_chat,
+            f"{found}\n\nНе удалось создать ссылку автоматически. Пришлите ссылку-приглашение, "
             "по которой участники будут вступать.",
             reply_markup=kb.url_kb(has_suggested=False),
         )
 
 
+async def _add_bot(admin_chat: int, ref: SponsorRef, state: FSMContext, bot: Bot, db: Database) -> None:
+    title = f"@{ref.username}"
+    if any(s.kind == KIND_BOT and s.title.lower() == title.lower() for s in await db.get_sponsors()):
+        await bot.send_message(admin_chat, f"Бот {escape(title)} уже есть в списке спонсоров.")
+        return
+    url = ref.link or f"https://t.me/{ref.username}"
+    await state.update_data(kind=KIND_BOT, chat_id=None, title=title, url=url)
+    await bot.send_message(
+        admin_chat,
+        f"✅ Распознал: 🤖 бот <b>{escape(title)}</b>\nСсылка для участников: {escape(url)}\n\n"
+        "ℹ️ Запуск чужого бота Telegram проверить не даёт — условие покажем участникам без проверки.",
+    )
+    await _ask_amount(bot, admin_chat, state)
+
+
 @router.message(AddSponsor.url, not_command)
-async def add_url_received(message: Message, state: FSMContext) -> None:
+async def add_url_received(message: Message, state: FSMContext, bot: Bot) -> None:
     data = await state.get_data()
     if message.text == kb.KEEP_URL_TEXT and data.get("suggested_url"):
         url = data["suggested_url"]
@@ -338,25 +381,7 @@ async def add_url_received(message: Message, state: FSMContext) -> None:
             await message.answer("Это не похоже на ссылку. Пример: <code>https://t.me/+AbCdEf123</code>")
             return
     await state.update_data(url=url)
-    await _ask_amount(message, state)
-
-
-@router.message(AddSponsor.bot, not_command)
-async def add_bot_received(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
-    if m := re.fullmatch(rf"@?({_USERNAME_RE})", text):
-        username, query = m.group(1), ""
-    elif m := _LINK_RE.fullmatch(text):
-        username, query = m.group(1), m.group(2) or ""
-    else:
-        await message.answer("Пришлите @username бота или ссылку вида https://t.me/some_bot")
-        return
-    if not username.lower().endswith("bot"):
-        await message.answer("Юзернейм бота в Telegram всегда оканчивается на «bot». Проверьте и пришлите ещё раз.")
-        return
-
-    await state.update_data(title=f"@{username}", url=f"https://t.me/{username}{query}", chat_id=None)
-    await _ask_amount(message, state)
+    await _ask_amount(bot, message.chat.id, state)
 
 
 @router.message(AddSponsor.amount, not_command)
