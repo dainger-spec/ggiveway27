@@ -981,42 +981,6 @@ button:focus-visible {
   padding-top: calc(var(--safe-top) + 46px);
 }
 
-/* Кольцо из снежинок вместо звёзд */
-.theme-new-year [data-stars] path.flake {
-  fill: none;
-  stroke: var(--frost);
-  stroke-linecap: round;
-}
-
-.theme-new-year .prize__ring {
-  filter: drop-shadow(0 0 6px rgba(170, 220, 255, 0.8));
-}
-
-.theme-new-year .brand {
-  color: var(--frost);
-}
-
-/* Снежная шапка на кнопках */
-.theme-new-year .cta {
-  position: relative;
-}
-
-/* Сугроб на кнопке: цепочка комков снега разного размера со скруглёнными концами */
-.theme-new-year .cta::before {
-  content: "";
-  position: absolute;
-  top: -8px;
-  right: 24px;
-  left: 24px;
-  height: 20px;
-  background:
-    radial-gradient(circle 12px at 50% 55%, #fff 95%, transparent) 9px 0 / 43px 100% repeat-x,
-    radial-gradient(circle 8.5px at 50% 62%, #fff 95%, transparent) 0 0 / 16px 100% repeat-x;
-  border-radius: 12px 12px 9px 9px;
-  filter: drop-shadow(0 2px 1px rgba(120, 170, 225, 0.5));
-  pointer-events: none;
-}
-
 /* Прогресс — леденец, пока не всё выполнено */
 .theme-new-year .progress__fill:not(.is-complete) {
   background: repeating-linear-gradient(-45deg, var(--ny-red) 0 7px, #fff4f4 7px 14px);
