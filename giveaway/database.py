@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS participants (
     full_name  TEXT    NOT NULL DEFAULT '',
     joined_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Каналы, затем чаты, затем боты; внутри группы — в порядке добавления.
@@ -118,6 +123,24 @@ class Database:
         cur = await self.conn.execute("DELETE FROM sponsors WHERE id = ?", (sponsor_id,))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ---------- Настройки ----------
+
+    async def get_setting(self, key: str) -> str | None:
+        async with self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
+            row = await cur.fetchone()
+        return row["value"] if row else None
+
+    async def set_settings(self, values: dict[str, str]) -> None:
+        await self.conn.executemany(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            list(values.items()),
+        )
+        await self.conn.commit()
+
+    async def delete_settings(self, *keys: str) -> None:
+        await self.conn.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in keys])
+        await self.conn.commit()
 
     # ---------- Участники ----------
 

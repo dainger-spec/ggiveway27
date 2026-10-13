@@ -4,6 +4,7 @@ from aiogram.types import (
     KeyboardButton,
     KeyboardButtonRequestChat,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -12,6 +13,7 @@ from .texts import KIND_ICONS
 
 CHECK_CB = "check_subs"
 
+WEBAPP_TEXT = "🎁 Открыть приложение"
 CANCEL_TEXT = "❌ Отмена"
 KEEP_URL_TEXT = "✅ Оставить эту ссылку"
 SKIP_TEXT = "⏭ Пропустить"
@@ -19,7 +21,7 @@ REMOVE_AMOUNT_TEXT = "🚫 Убрать сумму"
 
 
 class AdminCb(CallbackData, prefix="adm"):
-    action: str  # menu | sponsors | add | find | export
+    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete
 
 
 class KindCb(CallbackData, prefix="kind"):
@@ -50,8 +52,22 @@ def _sponsor_button_text(s: Sponsor) -> str:
 # ---------- Участники розыгрыша ----------
 
 
-def sponsors_kb(sponsors: list[Sponsor]) -> InlineKeyboardMarkup:
+def webapp_info(webapp_url: str) -> WebAppInfo:
+    return WebAppInfo(url=webapp_url + "/")
+
+
+def webapp_kb(webapp_url: str | None) -> InlineKeyboardMarkup | None:
+    if not webapp_url:
+        return None
     b = InlineKeyboardBuilder()
+    b.button(text=WEBAPP_TEXT, web_app=webapp_info(webapp_url))
+    return b.as_markup()
+
+
+def sponsors_kb(sponsors: list[Sponsor], webapp_url: str | None = None) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if webapp_url:
+        b.button(text=WEBAPP_TEXT, web_app=webapp_info(webapp_url))
     for s in sponsors:
         b.button(text=_sponsor_button_text(s), url=s.url)
     b.button(text="✅ Проверить подписку", callback_data=CHECK_CB)
@@ -69,7 +85,21 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     b.button(text="👥 Участники", callback_data=PageCb(page=0))
     b.button(text="🔎 Найти участника", callback_data=AdminCb(action="find"))
     b.button(text="📥 Выгрузить участников (CSV)", callback_data=AdminCb(action="export"))
-    b.adjust(2, 2, 1)
+    b.button(text="🖼 Фон мини-приложения", callback_data=AdminCb(action="bg"))
+    b.adjust(2, 2, 1, 1)
+    return b.as_markup()
+
+
+def background_kb(has_background: bool) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(
+        text="📤 Загрузить новый фон" if has_background else "📤 Загрузить фон",
+        callback_data=AdminCb(action="bg_upload"),
+    )
+    if has_background:
+        b.button(text="🗑 Убрать фон", callback_data=AdminCb(action="bg_delete"))
+    b.button(text="« В меню", callback_data=AdminCb(action="menu"))
+    b.adjust(1)
     return b.as_markup()
 
 

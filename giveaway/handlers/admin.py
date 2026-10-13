@@ -14,6 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    InlineKeyboardMarkup,
     Message,
     MessageOriginChannel,
     MessageOriginChat,
@@ -21,7 +22,7 @@ from aiogram.types import (
 )
 
 from .. import keyboards as kb
-from .. import texts
+from .. import media, texts
 from ..checker import bot_is_admin, find_missing
 from ..config import Config
 from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, KINDS, Database, Sponsor
@@ -53,6 +54,10 @@ class FindParticipant(StatesGroup):
     query = State()
 
 
+class SetBackground(StatesGroup):
+    media = State()
+
+
 # ---------- Вспомогательное ----------
 
 
@@ -61,7 +66,7 @@ async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> No
     total = await db.count_participants()
     await bot.send_message(
         chat_id,
-        texts.admin_menu(config.giveaway_name, sponsors, total),
+        texts.admin_menu(config.giveaway_name, sponsors, total, config.webapp_url),
         reply_markup=kb.admin_menu_kb(),
     )
 
@@ -136,7 +141,7 @@ async def menu(cb: CallbackQuery, state: FSMContext, db: Database, config: Confi
     await state.clear()
     sponsors = await db.get_sponsors()
     total = await db.count_participants()
-    await show(cb, texts.admin_menu(config.giveaway_name, sponsors, total), kb.admin_menu_kb())
+    await show(cb, texts.admin_menu(config.giveaway_name, sponsors, total, config.webapp_url), kb.admin_menu_kb())
     await cb.answer()
 
 
@@ -375,6 +380,56 @@ async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db:
     await state.clear()
     await message.answer("✅ Спонсор добавлен!", reply_markup=ReplyKeyboardRemove())
     await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor_id))
+
+
+# ---------- Фон мини-приложения ----------
+
+
+async def _background_menu(db: Database, config: Config) -> tuple[str, InlineKeyboardMarkup]:
+    background = await media.get_background(db, config.media_dir)
+    return texts.background_status(background, config.webapp_url), kb.background_kb(background is not None)
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bg"))
+async def background_menu(cb: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
+    await state.clear()
+    await show(cb, *await _background_menu(db, config))
+    await cb.answer()
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bg_upload"))
+async def background_upload_start(cb: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    await state.set_state(SetBackground.media)
+    await bot.send_message(
+        cb.from_user.id,
+        "📤 Пришлите картинку, GIF или видео для фона (до 20 МБ).\n\n"
+        "Совет: чтобы Telegram не сжимал картинку, отправьте её как файл.",
+        reply_markup=kb.cancel_kb(),
+    )
+    await cb.answer()
+
+
+@router.message(SetBackground.media, not_command)
+async def background_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
+    progress = await message.answer("⏳ Загружаю…")
+    error = await media.save_background(bot, db, config.media_dir, message)
+    await progress.delete()
+    if error:
+        await message.answer(error)
+        return
+    await state.clear()
+    await message.answer(
+        "✅ Фон обновлён — откройте мини-приложение, чтобы посмотреть.", reply_markup=ReplyKeyboardRemove()
+    )
+    text, markup = await _background_menu(db, config)
+    await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bg_delete"))
+async def background_delete(cb: CallbackQuery, db: Database, config: Config) -> None:
+    await media.remove_background(db, config.media_dir)
+    await show(cb, *await _background_menu(db, config))
+    await cb.answer("Фон убран")
 
 
 # ---------- Участники ----------

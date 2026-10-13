@@ -1,0 +1,569 @@
+(() => {
+  "use strict";
+
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const initData = (tg && tg.initData) || "";
+  const userId = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : 0;
+  const $ = (id) => document.getElementById(id);
+
+  const KINDS = {
+    channel: { label: "Канал", action: "Подписаться" },
+    chat: { label: "Чат", action: "Вступить" },
+    bot: { label: "Бот", action: "Запустить" },
+  };
+  const POLL_MS = 2500;
+  const PENDING_MS = 3 * 60 * 1000;
+  const BOT_OPEN_MS = 4000;
+  const STAR_PATH =
+    "M0,-1L.2245,-.309L.9511,-.309L.3633,.118L.5878,.809L0,.382L-.5878,.809L-.3633,.118L-.9511,-.309L-.2245,-.309Z";
+  const CHECK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  let state = null;
+  let screen = "welcome";
+  let refreshing = false;
+  let pollTimer = null;
+  const pending = new Map(); // id спонсора → когда нажали «Подписаться»
+  const capsules = new Map(); // id спонсора → { li, status }
+  const botsOpened = loadBotsOpened();
+
+  // ---------- Утилиты ----------
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function plural(n, forms) {
+    const a = Math.abs(n) % 100;
+    const b = a % 10;
+    return forms[a > 10 && a < 20 ? 2 : b === 1 ? 0 : b >= 2 && b <= 4 ? 1 : 2];
+  }
+
+  function haptic(kind) {
+    try {
+      if (kind === "tap") tg.HapticFeedback.impactOccurred("light");
+      else tg.HapticFeedback.notificationOccurred(kind);
+    } catch (_) {
+      /* вне Telegram или старая версия */
+    }
+  }
+
+  let toastTimer = null;
+  function toast(text) {
+    const node = $("toast");
+    node.textContent = text;
+    node.classList.add("is-shown");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => node.classList.remove("is-shown"), 3200);
+  }
+
+  function storageKey() {
+    return "giveaway:bots:" + userId;
+  }
+
+  function loadBotsOpened() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(storageKey()) || "[]"));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveBotsOpened() {
+    try {
+      localStorage.setItem(storageKey(), JSON.stringify([...botsOpened]));
+    } catch (_) {
+      /* хранилище недоступно — отметки живут до закрытия */
+    }
+  }
+
+  // ---------- Кольца звёзд ----------
+
+  function drawStars(node) {
+    const count = Number(node.dataset.stars) || 12;
+    const small = (Number(node.dataset.size) || 100) < 60;
+    const radius = small ? 36 : 44;
+    const scale = small ? 9 : 3.4;
+    let paths = "";
+    for (let i = 0; i < count; i += 1) {
+      const angle = (i / count) * Math.PI * 2;
+      const x = (radius * Math.sin(angle)).toFixed(2);
+      const y = (-radius * Math.cos(angle)).toFixed(2);
+      paths += `<path d="${STAR_PATH}" transform="translate(${x} ${y}) scale(${scale})"/>`;
+    }
+    node.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true">${paths}</svg>`;
+  }
+
+  // ---------- API ----------
+
+  async function api(path, method = "GET") {
+    const res = await fetch(path, {
+      method,
+      headers: { Authorization: "tma " + initData },
+      cache: "no-store",
+    });
+    const text = await res.text();
+    let body = null;
+    try {
+      body = JSON.parse(text);
+    } catch (_) {
+      /* ответ не JSON — это текст ошибки */
+    }
+    if (!res.ok && res.status !== 409) {
+      const error = new Error(body ? "Ошибка сервера" : text || "Ошибка сервера");
+      error.status = res.status;
+      throw error;
+    }
+    return { status: res.status, body };
+  }
+
+  async function refresh() {
+    if (!initData || refreshing) return;
+    refreshing = true;
+    try {
+      const { body } = await api("api/state");
+      setState(body);
+    } catch (e) {
+      if (e.status === 401) toast(e.message);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  function setState(next) {
+    state = next;
+    for (const s of state.sponsors) {
+      if (s.verifiable && s.done) pending.delete(s.id);
+    }
+    render();
+  }
+
+  // ---------- Навигация ----------
+
+  function go(name) {
+    screen = name;
+    for (const [key, id] of [
+      ["welcome", "screenWelcome"],
+      ["sponsors", "screenSponsors"],
+      ["done", "screenDone"],
+    ]) {
+      $(id).classList.toggle("is-active", key === name);
+    }
+    window.scrollTo(0, 0);
+    if (tg && initData) {
+      if (name === "welcome") tg.BackButton.hide();
+      else tg.BackButton.show();
+    }
+  }
+
+  // ---------- Фон ----------
+
+  function applyBackground(bg) {
+    const holder = $("bgMedia");
+    const key = bg ? bg.url : "";
+    if (holder.dataset.key === key) return;
+    holder.dataset.key = key;
+    holder.replaceChildren();
+    holder.parentElement.classList.toggle("has-media", Boolean(bg));
+    if (!bg) return;
+
+    if (bg.kind === "video") {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.defaultMuted = true;
+      video.loop = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.setAttribute("muted", "");
+      video.setAttribute("playsinline", "");
+      video.addEventListener("loadeddata", () => video.classList.add("is-ready"));
+      video.src = bg.url;
+      holder.append(video);
+      const play = () => video.play().catch(() => {});
+      play();
+      document.addEventListener("pointerdown", play, { once: true }); // iOS в режиме энергосбережения
+    } else {
+      const img = new Image();
+      img.alt = "";
+      img.decoding = "async";
+      img.onload = () => img.classList.add("is-ready");
+      img.src = bg.url;
+      holder.append(img);
+    }
+  }
+
+  // ---------- 1. Приветствие ----------
+
+  function renderWelcome() {
+    document.title = state.giveaway;
+    $("brandName").textContent = state.giveaway;
+    $("userName").textContent = state.user.first_name || "друг";
+
+    const prize = $("prizeTotal");
+    prize.classList.remove("is-loading", "is-multi", "is-text");
+    prize.replaceChildren();
+    if (state.total_prize) {
+      const parts = state.total_prize.split(" + ");
+      for (const part of parts) prize.append(el("span", null, part));
+      prize.classList.toggle("is-multi", parts.length > 1);
+    } else {
+      prize.textContent = "Скоро объявим";
+      prize.classList.add("is-text");
+    }
+
+    const sponsors = state.sponsors.length;
+    const people = state.participants;
+    $("stats").textContent =
+      `${sponsors} ${plural(sponsors, ["спонсор", "спонсора", "спонсоров"])} · ` +
+      `${people} ${plural(people, ["участник", "участника", "участников"])}`;
+
+    const ticket = $("myTicket");
+    ticket.hidden = !state.participant;
+    if (state.participant) $("myTicketNumber").textContent = "№" + state.participant.number;
+
+    const cta = $("btnParticipate");
+    if (!sponsors) {
+      cta.disabled = true;
+      cta.textContent = "Скоро старт";
+      showNotice("Спонсоры появятся совсем скоро — загляни позже.");
+    } else {
+      cta.disabled = false;
+      cta.textContent = state.participant ? "Мои спонсоры" : "Участвовать";
+      showNotice(null);
+    }
+  }
+
+  function showNotice(text) {
+    const notice = $("welcomeNotice");
+    notice.hidden = !text;
+    notice.textContent = text || "";
+  }
+
+  // ---------- 2. Спонсоры ----------
+
+  function statusOf(s) {
+    const done = s.verifiable ? s.done : botsOpened.has(s.id);
+    if (done) return "done";
+    return pending.has(s.id) ? "pending" : "todo";
+  }
+
+  function initial(title) {
+    const m = title.replace(/^@/, "").match(/[\p{L}\p{N}]/u);
+    return m ? m[0].toUpperCase() : "★";
+  }
+
+  function hueFor(title) {
+    let h = 0;
+    for (const ch of title) h = (h * 31 + ch.codePointAt(0)) % 997;
+    return 205 + (h % 70); // от синего до фиолетового, в тон флагу ЕС
+  }
+
+  function buildCapsule(s) {
+    const li = el("li", "capsule");
+
+    const avatar = el("div", "capsule__avatar", initial(s.title));
+    avatar.style.setProperty("--hue", hueFor(s.title));
+    if (s.avatar) {
+      const img = new Image();
+      img.alt = "";
+      img.decoding = "async";
+      img.onload = () => avatar.append(img);
+      img.src = s.avatar;
+    }
+
+    const body = el("div", "capsule__body");
+    body.append(el("div", "capsule__title"), el("div", "capsule__meta"));
+
+    const btn = el("button", "capsule__btn");
+    btn.type = "button";
+    btn.addEventListener("click", () => onSponsorClick(s.id));
+
+    li.append(avatar, body, btn);
+    return li;
+  }
+
+  function updateCapsule(entry, s, index) {
+    const { li } = entry;
+    li.style.setProperty("--i", index);
+    li.querySelector(".capsule__title").textContent = s.title;
+
+    const meta = li.querySelector(".capsule__meta");
+    meta.replaceChildren(el("span", null, (KINDS[s.kind] || {}).label || ""));
+    if (s.amount) meta.append(el("span", "capsule__amount", s.amount));
+
+    const status = statusOf(s);
+    if (entry.status === status) return;
+
+    const btn = li.querySelector(".capsule__btn");
+    if (status === "done") {
+      btn.innerHTML = CHECK_SVG;
+      btn.append(" Готово");
+    } else if (status === "pending") {
+      btn.replaceChildren(el("span", "spinner"), " Проверяем");
+    } else {
+      btn.textContent = (KINDS[s.kind] || {}).action || "Открыть";
+    }
+    btn.setAttribute("aria-label", `${btn.textContent.trim()}: ${s.title}`);
+
+    const lightUp = status === "done" && entry.status !== null;
+    li.dataset.state = status;
+    entry.status = status;
+    if (lightUp) light(li);
+  }
+
+  function light(li) {
+    li.classList.remove("is-lit");
+    void li.offsetWidth; // перезапуск анимации
+    li.classList.add("is-lit");
+    haptic("success");
+    setTimeout(() => li.classList.remove("is-lit"), 1300);
+  }
+
+  function renderSponsors() {
+    const list = $("capsules");
+    const ids = new Set(state.sponsors.map((s) => s.id));
+    for (const [id, entry] of capsules) {
+      if (!ids.has(id)) {
+        entry.li.remove();
+        capsules.delete(id);
+      }
+    }
+    list.querySelector(".empty")?.remove();
+
+    state.sponsors.forEach((s, index) => {
+      let entry = capsules.get(s.id);
+      if (!entry) {
+        entry = { li: buildCapsule(s), status: null };
+        capsules.set(s.id, entry);
+      }
+      list.append(entry.li);
+      updateCapsule(entry, s, index);
+    });
+    if (!state.sponsors.length) list.append(el("li", "empty", "Список спонсоров пока пуст."));
+
+    const total = state.sponsors.length;
+    const done = state.sponsors.filter((s) => statusOf(s) === "done").length;
+    $("progressText").textContent = total ? `Выполнено ${done} из ${total}` : "";
+    const fill = $("progressFill");
+    fill.style.width = total ? `${(done / total) * 100}%` : "0";
+    fill.classList.toggle("is-complete", total > 0 && done === total);
+
+    renderDock(done, total);
+  }
+
+  function renderDock(done, total) {
+    const btn = $("btnGetNumber");
+    const hint = $("dockHint");
+    btn.classList.remove("is-ready");
+
+    if (state.participant) {
+      btn.disabled = false;
+      btn.textContent = `Мой номер №${state.participant.number}`;
+      hint.textContent = "Ты уже участвуешь — не отписывайся до итогов";
+      return;
+    }
+    const ready = state.can_join && done === total && total > 0;
+    btn.disabled = !ready;
+    btn.textContent = "Получить номер";
+    btn.classList.toggle("is-ready", ready);
+    const left = total - done;
+    hint.textContent = ready
+      ? "Все условия выполнены — забирай номер!"
+      : `Осталось ${left} ${plural(left, ["спонсор", "спонсора", "спонсоров"])}`;
+  }
+
+  function findSponsor(id) {
+    return state && state.sponsors.find((s) => s.id === id);
+  }
+
+  function openLink(url) {
+    if (tg && initData) {
+      if (/^https:\/\/t\.me\//i.test(url)) tg.openTelegramLink(url);
+      else tg.openLink(url);
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+  }
+
+  function onSponsorClick(id) {
+    const s = findSponsor(id);
+    if (!s) return;
+    haptic("tap");
+    openLink(s.url);
+    if (statusOf(s) === "done") return;
+
+    pending.set(id, Date.now());
+    if (!s.verifiable) {
+      // Запуск чужого бота Telegram проверить не даёт — засчитываем переход.
+      setTimeout(() => markBotOpened(id), BOT_OPEN_MS);
+    }
+    renderSponsors();
+    startPolling();
+  }
+
+  function markBotOpened(id) {
+    if (botsOpened.has(id)) return;
+    pending.delete(id);
+    botsOpened.add(id);
+    saveBotsOpened();
+    if (state) renderSponsors();
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [id, startedAt] of pending) {
+        if (now - startedAt > PENDING_MS) pending.delete(id);
+      }
+      const waiting = [...pending.keys()].some((id) => (findSponsor(id) || {}).verifiable);
+      if (!waiting) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        renderSponsors();
+        return;
+      }
+      if (document.visibilityState === "visible") refresh();
+    }, POLL_MS);
+  }
+
+  function onReturn() {
+    // Вернулись из канала/бота — сразу перепроверяем.
+    for (const [id] of pending) {
+      const s = findSponsor(id);
+      if (s && !s.verifiable) markBotOpened(id);
+    }
+    refresh();
+  }
+
+  async function getNumber() {
+    if (state.participant) {
+      showDone(state.participant.number, false);
+      return;
+    }
+    const btn = $("btnGetNumber");
+    btn.disabled = true;
+    btn.replaceChildren(el("span", "spinner"), " Проверяем подписки");
+    try {
+      const { status, body } = await api("api/join", "POST");
+      setState(body);
+      if (status === 409 || !body.participant) {
+        haptic("error");
+        toast("Ещё не все подписки — проверь спонсоров без галочки");
+        for (const entry of capsules.values()) {
+          if (entry.status !== "done") {
+            entry.li.classList.remove("is-shake");
+            void entry.li.offsetWidth;
+            entry.li.classList.add("is-shake");
+          }
+        }
+        return;
+      }
+      showDone(body.participant.number, true);
+    } catch (e) {
+      toast(e.message || "Не получилось, попробуй ещё раз");
+      renderSponsors();
+    }
+  }
+
+  // ---------- 3. Номер ----------
+
+  function showDone(number, celebrate) {
+    const text = "№" + number;
+    const node = $("doneNumber");
+    node.textContent = text;
+    // Номер должен помещаться внутри кольца звёзд: чем больше цифр, тем мельче шрифт.
+    const ringWidth = Math.min(270, window.innerWidth * 0.76) * 0.62;
+    const size = Math.min(64, ringWidth / (0.82 * (text.length - 1) + 1.1));
+    node.style.setProperty("--number-size", `${Math.floor(size)}px`);
+    go("done");
+    if (!celebrate) return;
+    haptic("success");
+    const box = $("burst");
+    box.replaceChildren();
+    for (let i = 0; i < 24; i += 1) {
+      const star = el("span");
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 90 + Math.random() * 140;
+      star.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+      star.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
+      star.style.setProperty("--r", `${Math.round(Math.random() * 360)}deg`);
+      star.style.setProperty("--s", `${8 + Math.round(Math.random() * 10)}px`);
+      star.style.animationDelay = `${Math.round(Math.random() * 150)}ms`;
+      box.append(star);
+    }
+    setTimeout(() => box.replaceChildren(), 2000);
+  }
+
+  // ---------- Запуск ----------
+
+  function render() {
+    applyBackground(state.background);
+    renderWelcome();
+    renderSponsors();
+  }
+
+  function setupTelegram() {
+    if (!tg || !initData) return;
+    document.documentElement.classList.add("in-telegram");
+    tg.ready();
+    tg.expand();
+    for (const call of [
+      () => tg.setHeaderColor("#060914"),
+      () => tg.setBackgroundColor("#060914"),
+      () => tg.setBottomBarColor && tg.setBottomBarColor("#060914"),
+      () => tg.disableVerticalSwipes && tg.disableVerticalSwipes(),
+    ]) {
+      try {
+        call();
+      } catch (_) {
+        /* метод не поддерживается этой версией Telegram */
+      }
+    }
+    tg.BackButton.onClick(() => go("welcome"));
+    tg.onEvent("activated", onReturn);
+  }
+
+  function bind() {
+    $("btnParticipate").addEventListener("click", () => {
+      haptic("tap");
+      go("sponsors");
+    });
+    $("btnBack").addEventListener("click", () => go("welcome"));
+    $("btnGetNumber").addEventListener("click", getNumber);
+    $("btnShowSponsors").addEventListener("click", () => go("sponsors"));
+    $("btnClose").addEventListener("click", () => {
+      if (tg && initData) tg.close();
+      else go("welcome");
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onReturn();
+    });
+  }
+
+  async function boot() {
+    document.querySelectorAll("[data-stars]").forEach(drawStars);
+    setupTelegram();
+    bind();
+
+    if (!initData) {
+      $("prizeTotal").classList.remove("is-loading");
+      $("prizeTotal").textContent = "—";
+      showNotice("Открой это приложение через бота в Telegram.");
+      return;
+    }
+    try {
+      const { body } = await api("api/state");
+      setState(body);
+    } catch (e) {
+      $("prizeTotal").classList.remove("is-loading");
+      $("prizeTotal").textContent = "—";
+      showNotice(e.message || "Не удалось загрузить розыгрыш. Закрой и открой приложение ещё раз.");
+    }
+  }
+
+  boot();
+})();

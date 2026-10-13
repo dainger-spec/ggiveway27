@@ -2,6 +2,8 @@ from collections.abc import Iterable
 from html import escape
 
 from .database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Participant, Sponsor
+from .media import Background
+from .prizes import total_prize
 
 KIND_ICONS = {KIND_CHANNEL: "📢", KIND_CHAT: "💬", KIND_BOT: "🤖"}
 KIND_NAMES = {KIND_CHANNEL: "Канал", KIND_CHAT: "Чат", KIND_BOT: "Бот"}
@@ -73,14 +75,34 @@ def already_participant(number: int, giveaway: str) -> str:
 # ---------- Админка ----------
 
 
-def admin_menu(giveaway: str, sponsors: list[Sponsor], participants: int) -> str:
+def admin_menu(giveaway: str, sponsors: list[Sponsor], participants: int, webapp_url: str | None) -> str:
     counts = {kind: sum(1 for s in sponsors if s.kind == kind) for kind in KIND_ICONS}
     by_kind = " · ".join(f"{KIND_ICONS[k]} {n}" for k, n in counts.items())
+    prize = total_prize(s.amount for s in sponsors)
+    webapp = "✅ подключено" if webapp_url else "⚠️ не подключено (нужен WEBAPP_URL)"
     return (
         f"⚙️ <b>Админ-панель — {escape(giveaway)}</b>\n\n"
         f"Спонсоров: <b>{len(sponsors)}</b> ({by_kind})\n"
-        f"Участников: <b>{participants}</b>"
+        f"Призовой фонд: <b>{escape(prize) if prize else 'суммы не указаны'}</b>\n"
+        f"Участников: <b>{participants}</b>\n"
+        f"Мини-приложение: {webapp}"
     )
+
+
+def background_status(background: Background | None, webapp_url: str | None) -> str:
+    kinds = {"image": "картинка", "video": "видео / GIF"}
+    current = f"загружен ({kinds.get(background.kind, background.kind)})" if background else "не задан"
+    lines = [
+        "🖼 <b>Фон мини-приложения</b>",
+        "",
+        f"Сейчас: <b>{current}</b>",
+        "",
+        "Фон растягивается на весь экран и слегка затемняется, чтобы текст хорошо читался. "
+        "Подойдёт картинка, GIF или видео до 20 МБ.",
+    ]
+    if not webapp_url:
+        lines += ["", "⚠️ Мини-приложение не подключено: укажите WEBAPP_URL в настройках хостинга."]
+    return "\n".join(lines)
 
 
 def sponsors_list(sponsors: list[Sponsor]) -> str:

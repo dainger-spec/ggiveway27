@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Europe Private Giveaway</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700;800&display=swap">
+  <link rel="stylesheet" href="static/app.css?v=__V__">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="backdrop" aria-hidden="true">
+    <div class="backdrop__media" id="bgMedia"></div>
+    <div class="backdrop__shade"></div>
+  </div>
+
+  <main class="app">
+    <!-- 1. Приветствие -->
+    <section class="screen screen--welcome is-active" id="screenWelcome">
+      <header class="brand">
+        <span class="brand__stars" data-stars="12" data-size="22"></span>
+        <span class="brand__name" id="brandName">Europe Private Giveaway</span>
+      </header>
+
+      <div class="hero">
+        <p class="hero__hello">Привет, <span id="userName">друг</span>!</p>
+        <h1 class="hero__title">Добро пожаловать в&nbsp;розыгрыш</h1>
+      </div>
+
+      <div class="prize" id="prize">
+        <span class="prize__ring" data-stars="12" data-size="280"></span>
+        <div class="prize__inner">
+          <span class="prize__label">Общий призовой фонд</span>
+          <span class="prize__value is-loading" id="prizeTotal">&nbsp;</span>
+        </div>
+      </div>
+
+      <p class="stats" id="stats">&nbsp;</p>
+
+      <div class="ticket" id="myTicket" hidden>
+        <span class="ticket__label">Твой номер участника</span>
+        <span class="ticket__number" id="myTicketNumber"></span>
+      </div>
+
+      <div class="welcome__actions">
+        <button class="cta" id="btnParticipate" type="button" disabled>Участвовать</button>
+        <p class="notice" id="welcomeNotice" hidden></p>
+      </div>
+    </section>
+
+    <!-- 2. Спонсоры -->
+    <section class="screen screen--sponsors" id="screenSponsors">
+      <header class="bar">
+        <button class="bar__back" id="btnBack" type="button" aria-label="Назад">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="bar__text">
+          <h2 class="bar__title">Спонсоры</h2>
+          <p class="bar__progress" id="progressText"></p>
+        </div>
+      </header>
+      <div class="progress" aria-hidden="true"><div class="progress__fill" id="progressFill"></div></div>
+
+      <ul class="capsules" id="capsules"></ul>
+
+      <div class="dock">
+        <button class="cta" id="btnGetNumber" type="button" disabled>Получить номер</button>
+        <p class="dock__hint" id="dockHint"></p>
+      </div>
+    </section>
+
+    <!-- 3. Номер получен -->
+    <section class="screen screen--done" id="screenDone">
+      <div class="done__badge">
+        <span class="prize__ring" data-stars="12" data-size="280"></span>
+        <div class="done__inner">
+          <span class="prize__label">Твой номер</span>
+          <span class="done__number" id="doneNumber"></span>
+        </div>
+      </div>
+      <h2 class="done__title">Ты в игре!</h2>
+      <p class="done__text">Номер сохранён и продублирован в чат с ботом. Не отписывайся от спонсоров до подведения итогов — победителей перепроверяют.</p>
+      <div class="done__actions">
+        <button class="cta cta--ghost" id="btnShowSponsors" type="button">К спонсорам</button>
+        <button class="cta" id="btnClose" type="button">Готово</button>
+      </div>
+      <div class="burst" id="burst" aria-hidden="true"></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="static/app.js?v=__V__"></script>
+</body>
+</html>

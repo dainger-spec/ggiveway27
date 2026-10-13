@@ -11,7 +11,7 @@ from ..checker import find_missing
 from ..commands import set_admin_commands
 from ..config import Config
 from ..database import Database
-from ..keyboards import CHECK_CB, sponsors_kb
+from ..keyboards import CHECK_CB, sponsors_kb, webapp_kb
 from ..utils import show
 
 router = Router(name="user")
@@ -30,13 +30,16 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot, db: Database,
     participant = await db.get_participant(message.from_user.id)
     sponsors = await db.get_sponsors()
     if participant is not None:
-        await message.answer(texts.already_participant(participant.number, config.giveaway_name))
+        await message.answer(
+            texts.already_participant(participant.number, config.giveaway_name),
+            reply_markup=webapp_kb(config.webapp_url),
+        )
     elif not sponsors:
         await message.answer(texts.no_sponsors(config.giveaway_name))
     else:
         await message.answer(
             texts.welcome(message.from_user.first_name, config.giveaway_name, sponsors),
-            reply_markup=sponsors_kb(sponsors),
+            reply_markup=sponsors_kb(sponsors, config.webapp_url),
         )
 
     if message.from_user.id in config.admin_ids:
@@ -68,7 +71,7 @@ async def check_subscriptions(cb: CallbackQuery, bot: Bot, db: Database, config:
 
     missing = await find_missing(bot, sponsors, user.id)
     if missing:
-        await show(cb, texts.missing(missing), sponsors_kb(missing))
+        await show(cb, texts.missing(missing), sponsors_kb(missing, config.webapp_url))
         await cb.answer("Ещё не все условия выполнены")
         return
 
