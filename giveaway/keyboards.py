@@ -22,7 +22,7 @@ REMOVE_AMOUNT_TEXT = "🚫 Убрать сумму"
 
 
 class AdminCb(CallbackData, prefix="adm"):
-    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | snow | new_year
+    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | new_year
 
 
 class KindCb(CallbackData, prefix="kind"):  # только чтобы старые кнопки «Канал/Чат/Бот» не зависали
@@ -95,7 +95,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def appearance_kb(has_background: bool, snow: bool, new_year: bool) -> InlineKeyboardMarkup:
+def appearance_kb(has_background: bool, new_year: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
         text="📤 Загрузить новый фон" if has_background else "📤 Загрузить фон",
@@ -103,7 +103,6 @@ def appearance_kb(has_background: bool, snow: bool, new_year: bool) -> InlineKey
     )
     if has_background:
         b.button(text="🗑 Убрать фон", callback_data=AdminCb(action="bg_delete"))
-    b.button(text="❄️ Выключить снег" if snow else "❄️ Включить снег", callback_data=AdminCb(action="snow"))
     b.button(
         text="🎄 Выключить новогоднюю тему" if new_year else "🎄 Включить новогоднюю тему",
         callback_data=AdminCb(action="new_year"),

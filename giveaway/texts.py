@@ -94,19 +94,18 @@ def admin_menu(config: Config, sponsors: list[Sponsor], participants: int) -> st
     )
 
 
-def appearance_status(background: Background | None, snow: bool, new_year: bool, webapp_url: str | None) -> str:
+def appearance_status(background: Background | None, new_year: bool, webapp_url: str | None) -> str:
     kinds = {"image": "картинка", "video": "видео / GIF"}
     current = f"загружен ({kinds.get(background.kind, background.kind)})" if background else "не задан"
     lines = [
         "🎨 <b>Оформление мини-приложения</b>",
         "",
         f"🖼 Фон: <b>{current}</b>",
-        f"❄️ Снег: <b>{'идёт' if snow else 'выключен'}</b>",
         f"🎄 Новогодняя тема: <b>{'включена' if new_year else 'выключена'}</b>",
         "",
         "Фон растягивается на весь экран и слегка затемняется, чтобы текст хорошо читался. "
         "Подойдёт картинка, GIF или видео до 20 МБ.",
-        "Новогодняя тема — новогоднее приветствие и холодный зимний отсвет фона.",
+        "Новогодняя тема — новогоднее приветствие и зимний фон (если свой фон не загружен).",
     ]
     if not webapp_url:
         lines += ["", "⚠️ Мини-приложение не подключено: укажите WEBAPP_URL в настройках хостинга."]

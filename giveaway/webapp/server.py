@@ -90,7 +90,7 @@ async def _state(app: web.Application, user: WebAppUser, *, fresh: bool = False)
             for s in sponsors
         ],
         "can_join": bool(sponsors) and not missing,
-        "theme": {"snow": await db.get_flag(media.SNOW), "new_year": await db.get_flag(media.NEW_YEAR)},
+        "theme": {"new_year": await db.get_flag(media.NEW_YEAR)},
     }
 
 

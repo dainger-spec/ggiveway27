@@ -15,7 +15,7 @@ from .database import Database, Sponsor
 log = logging.getLogger(__name__)
 
 BG_KIND, BG_FILE, BG_VERSION = "bg_kind", "bg_file", "bg_version"
-SNOW, NEW_YEAR = "snow", "new_year"  # оформление мини-приложения: «1» — включено
+NEW_YEAR = "new_year"  # новогодняя тема мини-приложения: «1» — включена
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024  # больше Bot API скачать не даёт
 AVATAR_TTL = 24 * 3600
 

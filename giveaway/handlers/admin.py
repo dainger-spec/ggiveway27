@@ -531,10 +531,10 @@ async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db:
 
 async def _background_menu(db: Database, config: Config) -> tuple[str, InlineKeyboardMarkup]:
     background = await media.get_background(db, config.media_dir)
-    snow, new_year = await db.get_flag(media.SNOW), await db.get_flag(media.NEW_YEAR)
+    new_year = await db.get_flag(media.NEW_YEAR)
     return (
-        texts.appearance_status(background, snow, new_year, config.webapp_url),
-        kb.appearance_kb(background is not None, snow, new_year),
+        texts.appearance_status(background, new_year, config.webapp_url),
+        kb.appearance_kb(background is not None, new_year),
     )
 
 
@@ -545,14 +545,12 @@ async def background_menu(cb: CallbackQuery, state: FSMContext, db: Database, co
     await cb.answer()
 
 
-@router.callback_query(kb.AdminCb.filter(F.action.in_({"snow", "new_year"})))
-async def toggle_effect(cb: CallbackQuery, callback_data: kb.AdminCb, db: Database, config: Config) -> None:
-    key = media.SNOW if callback_data.action == "snow" else media.NEW_YEAR
-    enabled = not await db.get_flag(key)
-    await db.set_settings({key: "1" if enabled else "0"})
+@router.callback_query(kb.AdminCb.filter(F.action == "new_year"))
+async def toggle_new_year(cb: CallbackQuery, db: Database, config: Config) -> None:
+    enabled = not await db.get_flag(media.NEW_YEAR)
+    await db.set_settings({media.NEW_YEAR: "1" if enabled else "0"})
     await show(cb, *await _background_menu(db, config))
-    name = "Снег" if key == media.SNOW else "Новогодняя тема"
-    await cb.answer(f"{name}: {'включено' if enabled else 'выключено'}")
+    await cb.answer(f"Новогодняя тема: {'включена' if enabled else 'выключена'}")
 
 
 @router.callback_query(kb.AdminCb.filter(F.action == "bg_upload"))
