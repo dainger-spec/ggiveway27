@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import shutil
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -8,7 +10,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.types import MenuButtonDefault, MenuButtonWebApp
 
 from giveaway.commands import USER_COMMANDS, set_admin_commands
-from giveaway.config import Config, load_config
+from giveaway.config import BASE_DIR, Config, load_config
 from giveaway.database import Database
 from giveaway.handlers import admin, user
 from giveaway.keyboards import webapp_info
@@ -34,6 +36,20 @@ async def set_commands(bot: Bot, config: Config) -> None:
         log.warning("Не удалось установить кнопку мини-приложения: %s", e)
 
 
+def adopt_legacy_db(db_path: str) -> None:
+    """Раньше база лежала в корне проекта; переносим её в постоянную папку, если там ещё пусто."""
+    target = Path(db_path)
+    legacy = BASE_DIR / "giveaway.db"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or not legacy.exists() or legacy.resolve() == target.resolve():
+        return
+    for suffix in ("", "-wal", "-shm"):
+        src = legacy.with_name(legacy.name + suffix)
+        if src.exists():
+            shutil.copy2(src, target.with_name(target.name + suffix))
+    log.info("База перенесена из %s в %s", legacy, target)
+
+
 def build_dispatcher(config: Config, db: Database) -> Dispatcher:
     dp = Dispatcher(config=config, db=db)
     # Порядок важен: админские диалоги должны получать сообщения раньше пользовательских.
@@ -46,8 +62,10 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = load_config()
 
+    adopt_legacy_db(config.db_path)
     db = Database(config.db_path)
     await db.connect()
+    log.info("База данных: %s", config.db_path)
 
     bot = Bot(
         config.bot_token,

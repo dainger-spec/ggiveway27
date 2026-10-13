@@ -5,12 +5,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Корень проекта (папка с main.py): там лежат .env и база данных,
-# независимо от того, из какой папки хостинг запускает бота.
+# Корень проекта (папка с main.py), независимо от того, из какой папки хостинг запускает бота.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Админы по умолчанию — если переменная ADMIN_IDS не задана на хостинге.
 DEFAULT_ADMIN_IDS = "1457986905"
+# Адрес мини-приложения по умолчанию — если не заданы WEBAPP_URL и DOMAIN.
+DEFAULT_WEBAPP_URL = "https://giveaway.bothost.tech"
 
 log = logging.getLogger(__name__)
 
@@ -42,17 +43,27 @@ def load_config() -> Config:
     if not admin_ids:
         raise RuntimeError("Не задан ADMIN_IDS: укажите Telegram ID админов через запятую")
 
-    db_path = Path(os.getenv("DB_PATH", "").strip() or "giveaway.db")
+    # Bothost сохраняет между обновлениями только папку data (DATA_DIR=/app/data),
+    # поэтому база и файлы лежат там.
+    data_dir = Path(os.getenv("DATA_DIR", "").strip() or BASE_DIR / "data")
+    if not data_dir.is_absolute():
+        data_dir = BASE_DIR / data_dir
+
+    db_path = Path(os.getenv("DB_PATH", "").strip() or data_dir / "giveaway.db")
     if not db_path.is_absolute():
         db_path = BASE_DIR / db_path
 
-    media_dir = Path(os.getenv("MEDIA_DIR", "").strip() or db_path.parent / "media")
+    media_dir = Path(os.getenv("MEDIA_DIR", "").strip() or data_dir / "media")
     if not media_dir.is_absolute():
         media_dir = BASE_DIR / media_dir
 
-    webapp_url = os.getenv("WEBAPP_URL", "").strip().rstrip("/") or None
-    if webapp_url and not webapp_url.startswith("https://"):
-        log.error("WEBAPP_URL должен начинаться с https:// — мини-приложение отключено")
+    webapp_url = (os.getenv("WEBAPP_URL", "").strip() or os.getenv("DOMAIN", "").strip() or DEFAULT_WEBAPP_URL).rstrip(
+        "/"
+    )
+    if "://" not in webapp_url:
+        webapp_url = "https://" + webapp_url  # Bothost отдаёт DOMAIN без протокола
+    if not webapp_url.startswith("https://"):
+        log.error("Адрес мини-приложения должен начинаться с https:// — мини-приложение отключено")
         webapp_url = None
 
     raw_port = os.getenv("WEB_PORT", "").strip() or os.getenv("PORT", "").strip() or "8080"
