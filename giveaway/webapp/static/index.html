@@ -6,7 +6,7 @@
   <title>Europe New Year Giveaway</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700;800&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Montserrat:wght@700;800;900&display=swap">
   <link rel="stylesheet" href="static/giveaway.css?v=__V__">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -20,7 +20,7 @@
     <!-- 1. Приветствие -->
     <section class="screen screen--welcome is-active" id="screenWelcome">
       <div class="welcome__center">
-        <span class="emblem" data-stars="12" data-size="150" aria-hidden="true"></span>
+        <span class="emblem" data-stars="12" data-size="156" aria-hidden="true"></span>
         <h1 class="welcome__title" id="giveawayTitle">Europe New Year Giveaway</h1>
 
         <div class="prize" id="prize">
@@ -174,7 +174,7 @@
         const size = Number(node.dataset.size) || 100;
         const small = size < 60;
         const radius = small ? 36 : 44;
-        const scale = small ? 9 : size < 200 ? 4.6 : 3.4;
+        const scale = small ? 9 : size < 200 ? 7 : 5;
         let paths = "";
         for (let i = 0; i < count; i += 1) {
           const angle = (i / count) * Math.PI * 2;
