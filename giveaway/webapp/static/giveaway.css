@@ -17,8 +17,8 @@
   --glass-2: rgba(255, 255, 255, 0.13);
   --line: rgba(255, 255, 255, 0.15);
 
-  --font-display: "Montserrat", "Manrope", system-ui, sans-serif;
-  --font-body: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 
   --gutter: 18px;
   --pill: 999px;
@@ -182,8 +182,8 @@ button:focus-visible {
 
 .welcome__title {
   margin: 30px 0 0;
-  font: 900 clamp(32px, 9.6vw, 42px) / 1.08 var(--font-display);
-  letter-spacing: -0.015em;
+  font: 800 clamp(32px, 9.6vw, 42px) / 1.1 var(--font-display);
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 
