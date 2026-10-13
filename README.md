@@ -161,6 +161,6 @@ giveaway/handlers/admin.py  — админ-панель
 giveaway/prizes.py          — подсчёт общего призового фонда
 giveaway/media.py           — фон мини-приложения и аватарки спонсоров
 giveaway/webapp/server.py   — веб-сервер и API мини-приложения
-giveaway/webapp/static/     — само мини-приложение (HTML, CSS, JS), работает в Telegram, а не на сервере
+giveaway/webapp/static/     — само мини-приложение: index.html (вместе с кодом) и стили, работает в Telegram
 Dockerfile                  — сборка образа: Python 3.12, запуск main.py
 ```
