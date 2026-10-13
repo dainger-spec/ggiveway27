@@ -82,7 +82,7 @@ async def _state(app: web.Application, user: WebAppUser, *, fresh: bool = False)
                 "amount": s.amount,
                 "verifiable": s.checkable,
                 "done": s.id not in missing if s.checkable else None,
-                "avatar": f"media/avatar/{s.id}" if s.checkable else None,
+                "avatar": (f"media/avatar/{s.id}?v={s.avatar_file or 'tg'}" if s.checkable or s.avatar_file else None),
                 "background": (
                     {"kind": s.bg_kind, "url": f"media/sponsor/{s.id}?v={s.bg_file}"} if s.bg_file else None
                 ),
@@ -90,6 +90,7 @@ async def _state(app: web.Application, user: WebAppUser, *, fresh: bool = False)
             for s in sponsors
         ],
         "can_join": bool(sponsors) and not missing,
+        "theme": {"snow": await db.get_flag(media.SNOW), "new_year": await db.get_flag(media.NEW_YEAR)},
     }
 
 

@@ -22,7 +22,7 @@ REMOVE_AMOUNT_TEXT = "🚫 Убрать сумму"
 
 
 class AdminCb(CallbackData, prefix="adm"):
-    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete
+    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | snow | new_year
 
 
 class KindCb(CallbackData, prefix="kind"):  # только чтобы старые кнопки «Канал/Чат/Бот» не зависали
@@ -34,7 +34,7 @@ class PickChatCb(CallbackData, prefix="pick"):
 
 
 class SponsorCb(CallbackData, prefix="sp"):
-    action: str  # view | amount | bg | bg_delete | delete | delete_ok
+    action: str  # view | amount | avatar | avatar_delete | bg | bg_delete | delete | delete_ok
     id: int
 
 
@@ -90,12 +90,12 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     b.button(text="👥 Участники", callback_data=PageCb(page=0))
     b.button(text="🔎 Найти участника", callback_data=AdminCb(action="find"))
     b.button(text="📥 Выгрузить участников (CSV)", callback_data=AdminCb(action="export"))
-    b.button(text="🖼 Фон мини-приложения", callback_data=AdminCb(action="bg"))
+    b.button(text="🎨 Оформление приложения", callback_data=AdminCb(action="bg"))
     b.adjust(2, 2, 1, 1)
     return b.as_markup()
 
 
-def background_kb(has_background: bool) -> InlineKeyboardMarkup:
+def appearance_kb(has_background: bool, snow: bool, new_year: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
         text="📤 Загрузить новый фон" if has_background else "📤 Загрузить фон",
@@ -103,6 +103,11 @@ def background_kb(has_background: bool) -> InlineKeyboardMarkup:
     )
     if has_background:
         b.button(text="🗑 Убрать фон", callback_data=AdminCb(action="bg_delete"))
+    b.button(text="❄️ Выключить снег" if snow else "❄️ Включить снег", callback_data=AdminCb(action="snow"))
+    b.button(
+        text="🎄 Выключить новогоднюю тему" if new_year else "🎄 Включить новогоднюю тему",
+        callback_data=AdminCb(action="new_year"),
+    )
     b.button(text="« В меню", callback_data=AdminCb(action="menu"))
     b.adjust(1)
     return b.as_markup()
@@ -124,14 +129,21 @@ def admin_sponsors_kb(sponsors: list[Sponsor]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def sponsor_card_kb(sponsor_id: int, has_background: bool = False) -> InlineKeyboardMarkup:
+def sponsor_card_kb(sponsor_id: int, has_background: bool = False, has_avatar: bool = False) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="💰 Изменить сумму", callback_data=SponsorCb(action="amount", id=sponsor_id))
-    b.button(text="🖼 Фон капсулы", callback_data=SponsorCb(action="bg", id=sponsor_id))
-    rows = [2]
+    b.button(text="🖼 Аватарка", callback_data=SponsorCb(action="avatar", id=sponsor_id))
+    b.button(text="🌄 Фон капсулы", callback_data=SponsorCb(action="bg", id=sponsor_id))
+    rows = [1, 2]
+    removals = []
+    if has_avatar:
+        removals.append(("🚫 Убрать аватарку", "avatar_delete"))
     if has_background:
-        b.button(text="🚫 Убрать фон капсулы", callback_data=SponsorCb(action="bg_delete", id=sponsor_id))
-        rows.append(1)
+        removals.append(("🚫 Убрать фон", "bg_delete"))
+    for text, action in removals:
+        b.button(text=text, callback_data=SponsorCb(action=action, id=sponsor_id))
+    if removals:
+        rows.append(len(removals))
     b.button(text="🗑 Удалить спонсора", callback_data=SponsorCb(action="delete", id=sponsor_id))
     b.button(text="« К списку спонсоров", callback_data=AdminCb(action="sponsors"))
     b.adjust(*rows, 1, 1)

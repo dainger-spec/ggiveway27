@@ -15,6 +15,7 @@ from .database import Database, Sponsor
 log = logging.getLogger(__name__)
 
 BG_KIND, BG_FILE, BG_VERSION = "bg_kind", "bg_file", "bg_version"
+SNOW, NEW_YEAR = "snow", "new_year"  # оформление мини-приложения: «1» — включено
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024  # больше Bot API скачать не даёт
 AVATAR_TTL = 24 * 3600
 
@@ -124,6 +125,25 @@ async def remove_sponsor_background(db: Database, media_dir: str, sponsor: Spons
     _remove_file(media_dir, sponsor.bg_file)
 
 
+async def save_sponsor_avatar(bot: Bot, db: Database, media_dir: str, sponsor: Sponsor, message: Message) -> str | None:
+    """Сохраняет свою аватарку спонсора. Возвращает текст ошибки или None."""
+    source = _background_source(message)
+    if source is None or source[2] != "image":
+        return "Для аватарки пришлите картинку: фото или файл JPG / PNG / WebP / GIF."
+    try:
+        _, name = await download_media(bot, media_dir, message, f"avatar{sponsor.id}")
+    except MediaError as e:
+        return str(e)
+    await db.set_sponsor_avatar(sponsor.id, name)
+    _remove_file(media_dir, sponsor.avatar_file)
+    return None
+
+
+async def remove_sponsor_avatar(db: Database, media_dir: str, sponsor: Sponsor) -> None:
+    await db.set_sponsor_avatar(sponsor.id, None)
+    _remove_file(media_dir, sponsor.avatar_file)
+
+
 def sponsor_background_path(media_dir: str, sponsor: Sponsor) -> Path | None:
     if not sponsor.bg_file:
         return None
@@ -142,7 +162,9 @@ def _fresh(path: Path) -> bool:
 
 
 async def sponsor_avatar(bot: Bot, media_dir: str, sponsor: Sponsor) -> Path | None:
-    """Аватарка канала/чата, скачанная через бота и закэшированная на сутки."""
+    """Своя аватарка спонсора, иначе фото канала/чата (скачивается через бота, кэш на сутки)."""
+    if sponsor.avatar_file and (custom := Path(media_dir) / sponsor.avatar_file).is_file():
+        return custom
     if not sponsor.checkable:
         return None
     path = Path(media_dir) / "avatars" / f"{abs(sponsor.chat_id)}.jpg"

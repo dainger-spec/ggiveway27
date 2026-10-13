@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sponsors (
     amount     TEXT,
     bg_kind    TEXT,  -- фон капсулы в мини-приложении: image | video
     bg_file    TEXT,
+    avatar_file TEXT,  -- своя аватарка спонсора (вместо фото канала)
     created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS known_chats (
 );
 """
 
-_SPONSOR_COLUMNS = "id, kind, title, url, chat_id, amount, bg_kind, bg_file"
+_SPONSOR_COLUMNS = "id, kind, title, url, chat_id, amount, bg_kind, bg_file, avatar_file"
 # Каналы, затем чаты, затем боты; внутри группы — в порядке добавления.
 _SPONSOR_ORDER = "CASE kind WHEN 'channel' THEN 0 WHEN 'chat' THEN 1 ELSE 2 END, id"
 
@@ -66,6 +67,7 @@ class Sponsor:
     amount: str | None
     bg_kind: str | None = None  # фон капсулы: image | video
     bg_file: str | None = None
+    avatar_file: str | None = None  # своя аватарка, загруженная админом
 
     @property
     def checkable(self) -> bool:
@@ -106,7 +108,7 @@ class Database:
         """Добавляет новые колонки в базу, созданную старой версией бота."""
         async with self.conn.execute("PRAGMA table_info(sponsors)") as cur:
             columns = {row["name"] for row in await cur.fetchall()}
-        for column in ("bg_kind", "bg_file"):
+        for column in ("bg_kind", "bg_file", "avatar_file"):
             if column not in columns:
                 await self.conn.execute(f"ALTER TABLE sponsors ADD COLUMN {column} TEXT")
 
@@ -149,6 +151,10 @@ class Database:
 
     async def set_sponsor_background(self, sponsor_id: int, kind: str | None, file: str | None) -> None:
         await self.conn.execute("UPDATE sponsors SET bg_kind = ?, bg_file = ? WHERE id = ?", (kind, file, sponsor_id))
+        await self.conn.commit()
+
+    async def set_sponsor_avatar(self, sponsor_id: int, file: str | None) -> None:
+        await self.conn.execute("UPDATE sponsors SET avatar_file = ? WHERE id = ?", (file, sponsor_id))
         await self.conn.commit()
 
     async def delete_sponsor(self, sponsor_id: int) -> bool:
@@ -197,6 +203,10 @@ class Database:
         async with self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
             row = await cur.fetchone()
         return row["value"] if row else None
+
+    async def get_flag(self, key: str, default: bool = True) -> bool:
+        value = await self.get_setting(key)
+        return default if value is None else value == "1"
 
     async def set_settings(self, values: dict[str, str]) -> None:
         await self.conn.executemany(

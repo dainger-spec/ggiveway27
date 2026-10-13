@@ -57,6 +57,10 @@ class SetSponsorBackground(StatesGroup):
     media = State()
 
 
+class SetSponsorAvatar(StatesGroup):
+    media = State()
+
+
 # ---------- Вспомогательное ----------
 
 
@@ -72,7 +76,9 @@ async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> No
 
 async def _sponsor_card(bot: Bot, sponsor: Sponsor) -> tuple[str, InlineKeyboardMarkup]:
     rights = await bot_rights(bot, sponsor.chat_id) if sponsor.checkable else None
-    return texts.sponsor_card(sponsor, rights), kb.sponsor_card_kb(sponsor.id, bool(sponsor.bg_file))
+    return texts.sponsor_card(sponsor, rights), kb.sponsor_card_kb(
+        sponsor.id, bool(sponsor.bg_file), bool(sponsor.avatar_file)
+    )
 
 
 async def _send_sponsor_card(bot: Bot, chat_id: int, sponsor: Sponsor) -> None:
@@ -169,6 +175,7 @@ async def sponsor_delete_ok(cb: CallbackQuery, callback_data: kb.SponsorCb, db: 
     sponsor = await db.get_sponsor(callback_data.id)
     if sponsor is not None:
         await media.remove_sponsor_background(db, config.media_dir, sponsor)
+        await media.remove_sponsor_avatar(db, config.media_dir, sponsor)
     deleted = await db.delete_sponsor(callback_data.id)
     sponsors = await db.get_sponsors()
     await show(cb, texts.sponsors_list(sponsors), kb.admin_sponsors_kb(sponsors))
@@ -266,6 +273,54 @@ async def sponsor_bg_delete(
     await media.remove_sponsor_background(db, config.media_dir, sponsor)
     await show(cb, *await _sponsor_card(bot, await db.get_sponsor(sponsor.id)))
     await cb.answer("Фон капсулы убран")
+
+
+@router.callback_query(kb.SponsorCb.filter(F.action == "avatar"))
+async def sponsor_avatar_start(
+    cb: CallbackQuery, callback_data: kb.SponsorCb, state: FSMContext, bot: Bot, db: Database
+) -> None:
+    sponsor = await db.get_sponsor(callback_data.id)
+    if sponsor is None:
+        await cb.answer("Спонсор уже удалён", show_alert=True)
+        return
+    await state.set_state(SetSponsorAvatar.media)
+    await state.update_data(sponsor_id=sponsor.id)
+    await bot.send_message(
+        cb.from_user.id,
+        f"🖼 Пришлите картинку для аватарки {texts.sponsor_line(sponsor)}.\n\n"
+        "Она показывается в кружке слева в капсуле, поэтому лучше квадратная картинка с логотипом по центру.",
+        reply_markup=kb.cancel_kb(),
+    )
+    await cb.answer()
+
+
+@router.message(SetSponsorAvatar.media, not_command)
+async def sponsor_avatar_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
+    sponsor = await db.get_sponsor((await state.get_data())["sponsor_id"])
+    if sponsor is None:
+        await state.clear()
+        await message.answer("Спонсор уже удалён.", reply_markup=ReplyKeyboardRemove())
+        return
+    error = await media.save_sponsor_avatar(bot, db, config.media_dir, sponsor, message)
+    if error:
+        await message.answer(error)
+        return
+    await state.clear()
+    await message.answer("✅ Аватарка обновлена.", reply_markup=ReplyKeyboardRemove())
+    await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor.id))
+
+
+@router.callback_query(kb.SponsorCb.filter(F.action == "avatar_delete"))
+async def sponsor_avatar_delete(
+    cb: CallbackQuery, callback_data: kb.SponsorCb, bot: Bot, db: Database, config: Config
+) -> None:
+    sponsor = await db.get_sponsor(callback_data.id)
+    if sponsor is None:
+        await cb.answer("Спонсор уже удалён", show_alert=True)
+        return
+    await media.remove_sponsor_avatar(db, config.media_dir, sponsor)
+    await show(cb, *await _sponsor_card(bot, await db.get_sponsor(sponsor.id)))
+    await cb.answer("Аватарка убрана")
 
 
 # ---------- Добавление спонсора ----------
@@ -471,12 +526,16 @@ async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db:
     await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor_id))
 
 
-# ---------- Фон мини-приложения ----------
+# ---------- Оформление мини-приложения ----------
 
 
 async def _background_menu(db: Database, config: Config) -> tuple[str, InlineKeyboardMarkup]:
     background = await media.get_background(db, config.media_dir)
-    return texts.background_status(background, config.webapp_url), kb.background_kb(background is not None)
+    snow, new_year = await db.get_flag(media.SNOW), await db.get_flag(media.NEW_YEAR)
+    return (
+        texts.appearance_status(background, snow, new_year, config.webapp_url),
+        kb.appearance_kb(background is not None, snow, new_year),
+    )
 
 
 @router.callback_query(kb.AdminCb.filter(F.action == "bg"))
@@ -484,6 +543,16 @@ async def background_menu(cb: CallbackQuery, state: FSMContext, db: Database, co
     await state.clear()
     await show(cb, *await _background_menu(db, config))
     await cb.answer()
+
+
+@router.callback_query(kb.AdminCb.filter(F.action.in_({"snow", "new_year"})))
+async def toggle_effect(cb: CallbackQuery, callback_data: kb.AdminCb, db: Database, config: Config) -> None:
+    key = media.SNOW if callback_data.action == "snow" else media.NEW_YEAR
+    enabled = not await db.get_flag(key)
+    await db.set_settings({key: "1" if enabled else "0"})
+    await show(cb, *await _background_menu(db, config))
+    name = "Снег" if key == media.SNOW else "Новогодняя тема"
+    await cb.answer(f"{name}: {'включено' if enabled else 'выключено'}")
 
 
 @router.callback_query(kb.AdminCb.filter(F.action == "bg_upload"))

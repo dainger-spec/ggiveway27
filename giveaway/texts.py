@@ -94,16 +94,19 @@ def admin_menu(config: Config, sponsors: list[Sponsor], participants: int) -> st
     )
 
 
-def background_status(background: Background | None, webapp_url: str | None) -> str:
+def appearance_status(background: Background | None, snow: bool, new_year: bool, webapp_url: str | None) -> str:
     kinds = {"image": "картинка", "video": "видео / GIF"}
     current = f"загружен ({kinds.get(background.kind, background.kind)})" if background else "не задан"
     lines = [
-        "🖼 <b>Фон мини-приложения</b>",
+        "🎨 <b>Оформление мини-приложения</b>",
         "",
-        f"Сейчас: <b>{current}</b>",
+        f"🖼 Фон: <b>{current}</b>",
+        f"❄️ Снег: <b>{'идёт' if snow else 'выключен'}</b>",
+        f"🎄 Новогодняя тема: <b>{'включена' if new_year else 'выключена'}</b>",
         "",
         "Фон растягивается на весь экран и слегка затемняется, чтобы текст хорошо читался. "
         "Подойдёт картинка, GIF или видео до 20 МБ.",
+        "Новогодняя тема — гирлянда, кольцо из снежинок, новогоднее приветствие и зимний фон.",
     ]
     if not webapp_url:
         lines += ["", "⚠️ Мини-приложение не подключено: укажите WEBAPP_URL в настройках хостинга."]
@@ -133,6 +136,10 @@ def sponsor_card(s: Sponsor, rights: tuple[bool, bool] | None) -> str:
     lines.append(f"Сумма: <b>{escape(s.amount)}</b>" if s.amount else "Сумма: не указана")
     background = {"image": "картинка", "video": "видео / GIF"}.get(s.bg_kind or "", "")
     lines.append(f"Фон капсулы: <b>{background}</b>" if s.bg_file else "Фон капсулы: нет")
+    if s.avatar_file:
+        lines.append("Аватарка: <b>своя</b>")
+    else:
+        lines.append("Аватарка: " + ("фото канала" if s.checkable else "первая буква названия"))
     lines.append("")
     if s.kind == KIND_BOT:
         lines.append(

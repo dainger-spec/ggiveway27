@@ -15,6 +15,8 @@
     <div class="backdrop__media" id="bgMedia"></div>
     <div class="backdrop__shade"></div>
   </div>
+  <canvas class="snow" id="snow" aria-hidden="true" hidden></canvas>
+  <div class="garland" id="garland" aria-hidden="true"></div>
 
   <main class="app">
     <!-- 1. Приветствие -->
@@ -25,8 +27,8 @@
       </header>
 
       <div class="hero">
-        <p class="hero__hello">Привет, <span id="userName">друг</span>!</p>
-        <h1 class="hero__title">Добро пожаловать в&nbsp;розыгрыш</h1>
+        <p class="hero__hello"><span id="helloWord">Привет</span>, <span id="userName">друг</span>!</p>
+        <h1 class="hero__title" id="heroTitle">Добро пожаловать в&nbsp;розыгрыш</h1>
       </div>
 
       <div class="prize" id="prize">
@@ -177,20 +179,165 @@
 
       // ---------- Кольца звёзд ----------
 
+      function isNewYear() {
+        return document.documentElement.classList.contains("theme-new-year");
+      }
+
+      // Снежинка: шесть лучей с веточками, в тех же координатах, что и звезда (радиус 1).
+      const FLAKE_PATH = (() => {
+        let d = "";
+        const at = (a, r) => `${(r * Math.sin(a)).toFixed(3)},${(-r * Math.cos(a)).toFixed(3)}`;
+        for (let k = 0; k < 6; k += 1) {
+          const a = (k * Math.PI) / 3;
+          d += `M0,0L${at(a, 1)}M${at(a, 0.55)}L${at(a + 0.42, 0.85)}M${at(a, 0.55)}L${at(a - 0.42, 0.85)}`;
+        }
+        return d;
+      })();
+
       function drawStars(node) {
         const count = Number(node.dataset.stars) || 12;
         const small = (Number(node.dataset.size) || 100) < 60;
         const radius = small ? 36 : 44;
-        const scale = small ? 9 : 3.4;
+        const flakes = isNewYear();
+        const scale = (small ? 9 : 3.4) * (flakes ? 1.2 : 1);
         let paths = "";
         for (let i = 0; i < count; i += 1) {
           const angle = (i / count) * Math.PI * 2;
           const x = (radius * Math.sin(angle)).toFixed(2);
           const y = (-radius * Math.cos(angle)).toFixed(2);
-          paths += `<path d="${STAR_PATH}" transform="translate(${x} ${y}) scale(${scale})"/>`;
+          const transform = `translate(${x} ${y}) scale(${scale})`;
+          paths += flakes
+            ? `<path class="flake" d="${FLAKE_PATH}" transform="${transform}" stroke-width="${small ? 0.32 : 0.2}"/>`
+            : `<path d="${STAR_PATH}" transform="${transform}"/>`;
         }
         node.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true">${paths}</svg>`;
       }
+
+      // ---------- Новогодняя тема и снег ----------
+
+      const Snow = (() => {
+        const canvas = document.getElementById("snow");
+        const ctx = canvas.getContext("2d");
+        const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let flakes = [];
+        let raf = 0;
+        let running = false;
+        let last = 0;
+        let w = 0;
+        let h = 0;
+
+        function flake(anywhere) {
+          const r = 0.8 + Math.random() ** 2 * 3.4;
+          return {
+            x: Math.random() * w,
+            y: anywhere ? Math.random() * h : -2 * r,
+            r,
+            vy: 16 + r * 12 + Math.random() * 10, // крупные падают быстрее, как ближние
+            phase: Math.random() * Math.PI * 2,
+            sway: 0.5 + Math.random(),
+            amp: 6 + Math.random() * 16,
+            alpha: 0.35 + Math.random() * 0.55,
+          };
+        }
+
+        function resize() {
+          const dpr = Math.min(2, window.devicePixelRatio || 1);
+          w = window.innerWidth;
+          h = window.innerHeight;
+          canvas.width = Math.round(w * dpr);
+          canvas.height = Math.round(h * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const count = Math.round(Math.min(110, (w * h) / 6500));
+          while (flakes.length < count) flakes.push(flake(true));
+          flakes.length = count;
+          if (still) draw(0);
+        }
+
+        function draw(dt) {
+          ctx.clearRect(0, 0, w, h);
+          ctx.fillStyle = "#fff";
+          for (const f of flakes) {
+            f.y += f.vy * dt;
+            f.phase += f.sway * dt;
+            if (f.y - f.r > h) Object.assign(f, flake(false));
+            ctx.globalAlpha = f.alpha;
+            ctx.beginPath();
+            ctx.arc(f.x + Math.sin(f.phase) * f.amp, f.y, f.r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+        }
+
+        function frame(t) {
+          const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
+          last = t;
+          if (document.visibilityState === "visible") draw(dt);
+          raf = requestAnimationFrame(frame);
+        }
+
+        return {
+          start() {
+            if (running) return;
+            running = true;
+            canvas.hidden = false;
+            resize();
+            window.addEventListener("resize", resize);
+            if (!still) {
+              last = 0;
+              raf = requestAnimationFrame(frame);
+            }
+          },
+          stop() {
+            if (!running) return;
+            running = false;
+            cancelAnimationFrame(raf);
+            window.removeEventListener("resize", resize);
+            canvas.hidden = true;
+          },
+        };
+      })();
+
+      const BULB_COLORS = ["#ff4d5e", "#ffcc33", "#35e38c", "#4cc2ff"];
+
+      function buildGarland() {
+        const box = $("garland");
+        box.replaceChildren();
+        if (!isNewYear()) return;
+        const step = 46;
+        const count = Math.ceil(window.innerWidth / step) + 1;
+        let wire = "M0,4";
+        let bulbs = "";
+        for (let i = 0; i < count; i += 1) {
+          const x = i * step + step / 2;
+          wire += ` Q${x},26 ${(i + 1) * step},4`;
+          const color = BULB_COLORS[i % BULB_COLORS.length];
+          bulbs +=
+            `<g class="bulb" style="color:${color};--d:${((i * 0.37) % 2.4).toFixed(2)}s">` +
+            `<rect class="cap" x="${x - 3}" y="13" width="6" height="5" rx="1.5"/>` +
+            `<ellipse cx="${x}" cy="25" rx="5" ry="7.5" fill="currentColor"/></g>`;
+        }
+        box.innerHTML =
+          `<svg width="${count * step}" height="44" viewBox="0 0 ${count * step} 44">` +
+          `<path class="wire" d="${wire}"/>${bulbs}</svg>`;
+      }
+
+      let themeKey = "";
+      function applyTheme(theme) {
+        const newYear = Boolean(theme && theme.new_year);
+        const snow = Boolean(theme && theme.snow);
+        const key = `${newYear}|${snow}`;
+        if (key === themeKey) return;
+        themeKey = key;
+        document.documentElement.classList.toggle("theme-new-year", newYear);
+        document.querySelectorAll("[data-stars]").forEach(drawStars);
+        buildGarland();
+        if (snow) Snow.start();
+        else Snow.stop();
+      }
+
+      window.addEventListener("resize", () => {
+        if (isNewYear()) buildGarland();
+      });
 
       // ---------- API ----------
 
@@ -297,6 +444,13 @@
         document.title = state.giveaway;
         $("brandName").textContent = state.giveaway;
         $("userName").textContent = state.user.first_name || "друг";
+        const newYear = Boolean(state.theme && state.theme.new_year);
+        $("helloWord").textContent = newYear
+          ? new Date().getMonth() === 11
+            ? "С наступающим"
+            : "С Новым годом"
+          : "Привет";
+        $("heroTitle").textContent = newYear ? "Новогодний розыгрыш" : "Добро пожаловать в\u00a0розыгрыш";
 
         const prize = $("prizeTotal");
         prize.classList.remove("is-loading", "is-multi", "is-text");
@@ -624,6 +778,7 @@
           star.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
           star.style.setProperty("--r", `${Math.round(Math.random() * 360)}deg`);
           star.style.setProperty("--s", `${8 + Math.round(Math.random() * 10)}px`);
+          if (isNewYear()) star.style.background = ["#ffcc33", "#ffffff", "#ff4d5e"][i % 3];
           star.style.animationDelay = `${Math.round(Math.random() * 150)}ms`;
           box.append(star);
         }
@@ -633,6 +788,7 @@
       // ---------- Запуск ----------
 
       function render() {
+        applyTheme(state.theme);
         applyBackground(state.background);
         renderWelcome();
         renderSponsors();
