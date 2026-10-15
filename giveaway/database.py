@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sponsors (
     bg_kind    TEXT,  -- фон капсулы в мини-приложении: image | video
     bg_file    TEXT,
     avatar_file TEXT,  -- своя аватарка спонсора (вместо фото канала)
+    announced  INTEGER NOT NULL DEFAULT 1,  -- 0 — о новом спонсоре ещё не было рассылки
     created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -41,6 +42,13 @@ CREATE TABLE IF NOT EXISTS join_requests (
     user_id    INTEGER NOT NULL,
     created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (chat_id, user_id)
+);
+
+-- Все, кто запускал бота или открывал мини-приложение: им уходят рассылки
+CREATE TABLE IF NOT EXISTS users (
+    user_id    INTEGER PRIMARY KEY,
+    blocked    INTEGER NOT NULL DEFAULT 0,  -- 1 — заблокировал бота, рассылки не получает
+    created_at TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Каналы и чаты, где бот стал администратором (нужны, чтобы узнать приватный канал по ссылке-приглашению)
@@ -111,6 +119,10 @@ class Database:
         for column in ("bg_kind", "bg_file", "avatar_file"):
             if column not in columns:
                 await self.conn.execute(f"ALTER TABLE sponsors ADD COLUMN {column} TEXT")
+        if "announced" not in columns:  # о спонсорах, добавленных раньше, рассылать не нужно
+            await self.conn.execute("ALTER TABLE sponsors ADD COLUMN announced INTEGER NOT NULL DEFAULT 1")
+        # Участники, получившие номер до появления таблицы users, тоже получают рассылки.
+        await self.conn.execute("INSERT OR IGNORE INTO users (user_id) SELECT user_id FROM participants")
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -121,7 +133,7 @@ class Database:
 
     async def add_sponsor(self, kind: str, title: str, url: str, chat_id: int | None, amount: str | None) -> int:
         cur = await self.conn.execute(
-            "INSERT INTO sponsors (kind, title, url, chat_id, amount) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO sponsors (kind, title, url, chat_id, amount, announced) VALUES (?, ?, ?, ?, ?, 0)",
             (kind, title, url, chat_id, amount),
         )
         await self.conn.commit()
@@ -131,6 +143,18 @@ class Database:
         async with self.conn.execute(f"SELECT {_SPONSOR_COLUMNS} FROM sponsors ORDER BY {_SPONSOR_ORDER}") as cur:
             rows = await cur.fetchall()
         return [Sponsor(**dict(row)) for row in rows]
+
+    async def unannounced_sponsors(self) -> list[Sponsor]:
+        """Новые спонсоры, о которых ещё не было рассылки."""
+        async with self.conn.execute(
+            f"SELECT {_SPONSOR_COLUMNS} FROM sponsors WHERE announced = 0 ORDER BY {_SPONSOR_ORDER}"
+        ) as cur:
+            rows = await cur.fetchall()
+        return [Sponsor(**dict(row)) for row in rows]
+
+    async def mark_announced(self, sponsor_ids: list[int]) -> None:
+        await self.conn.executemany("UPDATE sponsors SET announced = 1 WHERE id = ?", [(i,) for i in sponsor_ids])
+        await self.conn.commit()
 
     async def get_sponsor(self, sponsor_id: int) -> Sponsor | None:
         async with self.conn.execute(
@@ -161,6 +185,27 @@ class Database:
         cur = await self.conn.execute("DELETE FROM sponsors WHERE id = ?", (sponsor_id,))
         await self.conn.commit()
         return cur.rowcount > 0
+
+    # ---------- Пользователи бота (для рассылок) ----------
+
+    async def touch_user(self, user_id: int) -> None:
+        """Запоминает пользователя; если он раньше блокировал бота — снова получает рассылки."""
+        await self.conn.execute(
+            "INSERT INTO users (user_id) VALUES (?) ON CONFLICT(user_id) DO UPDATE SET blocked = 0", (user_id,)
+        )
+        await self.conn.commit()
+
+    async def mark_blocked(self, user_id: int) -> None:
+        await self.conn.execute("UPDATE users SET blocked = 1 WHERE user_id = ?", (user_id,))
+        await self.conn.commit()
+
+    async def broadcast_recipients(self) -> list[tuple[int, int | None]]:
+        """(user_id, номер участника или None) всех, кто не заблокировал бота."""
+        async with self.conn.execute(
+            "SELECT u.user_id, p.number FROM users u LEFT JOIN participants p ON p.user_id = u.user_id "
+            "WHERE u.blocked = 0 ORDER BY u.user_id"
+        ) as cur:
+            return [(row["user_id"], row["number"]) for row in await cur.fetchall()]
 
     # ---------- Заявки на вступление ----------
 
@@ -263,6 +308,7 @@ class Database:
                 "SELECT ?, COALESCE(MAX(number), 0) + 1, ?, ? FROM participants",
                 (user_id, username, full_name),
             )
+            await self.conn.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
             await self.conn.commit()
             participant = await self.get_participant(user_id)
         assert participant is not None

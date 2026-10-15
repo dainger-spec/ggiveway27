@@ -1,13 +1,27 @@
 from collections.abc import Iterable
 from html import escape
+from typing import TYPE_CHECKING
 
 from .config import Config
 from .database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Participant, Sponsor
 from .media import Background
 from .prizes import total_prize
 
+if TYPE_CHECKING:
+    from .broadcast import Report
+
 KIND_ICONS = {KIND_CHANNEL: "📢", KIND_CHAT: "💬", KIND_BOT: "🤖"}
 KIND_NAMES = {KIND_CHANNEL: "Канал", KIND_CHAT: "Чат", KIND_BOT: "Бот"}
+KIND_ACTIONS = {KIND_CHANNEL: "Подпишись на канал", KIND_CHAT: "Вступи в чат", KIND_BOT: "Запусти бота"}
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
 
 # ---------- Участники розыгрыша ----------
 
@@ -47,10 +61,11 @@ def no_sponsors(giveaway: str) -> str:
     )
 
 
-def missing(sponsors: list[Sponsor]) -> str:
+def missing(sponsors: list[Sponsor], number: int | None = None) -> str:
+    kept = f"Твой номер <b>№{number}</b> сохранён, но появились новые условия.\n" if number is not None else ""
     return (
         "❌ <b>Ещё не все условия выполнены</b>\n\n"
-        "Ты не подписан(а) на:\n"
+        f"{kept}Ты не подписан(а) на:\n"
         + "\n".join(f"• {sponsor_line(s)}" for s in sponsors)
         + "\n\nПодпишись и нажми «✅ Проверить подписку» ещё раз."
     )
@@ -81,6 +96,30 @@ def already_participant(number: int, giveaway: str) -> str:
     )
 
 
+def new_sponsors(sponsors: list[Sponsor], giveaway: str, number: int | None) -> str:
+    """Рассылка о новых спонсорах. number — номер участника или None, если номера ещё нет."""
+    one = len(sponsors) == 1
+    lines = [
+        f"🆕 <b>{'Новый спонсор' if one else 'Новые спонсоры'} в розыгрыше {escape(giveaway)}!</b>",
+        "",
+        "Что нужно сделать:",
+    ]
+    for s in sponsors:
+        line = f'{KIND_ICONS[s.kind]} {KIND_ACTIONS[s.kind]} <a href="{escape(s.url)}">{escape(s.title)}</a>'
+        if s.amount:
+            line += f" — 💰 <b>{escape(s.amount)}</b>"
+        lines.append(line)
+    lines.append("")
+    if number is not None:
+        lines.append(
+            f"Твой номер <b>№{number}</b> сохраняется ✅ Выполни {'новое условие' if one else 'новые условия'} — "
+            "перед подведением итогов подписки участников перепроверяют."
+        )
+    else:
+        lines.append("Выполни все условия розыгрыша и получи номер участника — нажми «✅ Проверить подписку».")
+    return "\n".join(lines)
+
+
 # ---------- Админка ----------
 
 
@@ -99,6 +138,50 @@ def admin_menu(config: Config, sponsors: list[Sponsor], participants: int) -> st
         f"Участников: <b>{participants}</b>\n"
         f"Мини-приложение: {webapp}\n"
         f"База: <code>{escape(config.db_path)}</code> {storage}"
+    )
+
+
+def broadcast_prompt(sponsors: list[Sponsor], recipients: int, with_number: int) -> str:
+    head = "📣 <b>Рассылка о новых спонсорах</b>"
+    if not sponsors:
+        return (
+            f"{head}\n\nНовых спонсоров нет — обо всех уже сообщили. "
+            "Когда добавите спонсора, бот сам предложит разослать уведомление."
+        )
+    users = plural(recipients, "пользователь", "пользователя", "пользователей")
+    return (
+        f"{head}\n\n"
+        + ("Новый спонсор:\n" if len(sponsors) == 1 else "Новые спонсоры:\n")
+        + "\n".join(f"• {sponsor_line(s)}" for s in sponsors)
+        + f"\n\nСообщение получат <b>{recipients}</b> {users} бота (с номером участника — {with_number}).\n"
+        "В нём будет, что нужно сделать — подписаться на канал, вступить в чат или запустить бота, — "
+        "и кнопки-ссылки. Участникам напомним, что их номер сохраняется."
+    )
+
+
+def broadcast_progress(report: "Report") -> str:
+    return (
+        f"📣 <b>Рассылка идёт…</b> {report.done} из {report.total}\n\n"
+        f"✅ Доставлено: {report.sent}\n"
+        f"🚫 Заблокировали бота: {report.blocked}\n"
+        f"⚠️ Не доставлено: {report.failed}"
+    )
+
+
+def broadcast_report(report: "Report") -> str:
+    minutes, seconds = divmod(report.seconds, 60)
+    took = f"{minutes} мин {seconds} с" if minutes else f"{seconds} с"
+    head = (
+        f"⏹ <b>Рассылка остановлена</b> на {report.done} из {report.total}"
+        if report.stopped
+        else "✅ <b>Рассылка завершена</b>"
+    )
+    return (
+        f"{head}\n\n"
+        f"Доставлено: <b>{report.sent}</b>\n"
+        f"Заблокировали бота: {report.blocked}\n"
+        f"Не доставлено: {report.failed}\n"
+        f"Заняло: {took}"
     )
 
 

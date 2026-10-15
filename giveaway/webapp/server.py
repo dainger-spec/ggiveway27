@@ -27,6 +27,7 @@ DB = web.AppKey("db", Database)
 CONFIG = web.AppKey("config", Config)
 CHECK_CACHE = web.AppKey("check_cache", dict)
 ASSET_VERSION = web.AppKey("asset_version", str)
+SEEN_USERS = web.AppKey("seen_users", set)
 CAPTCHA = web.AppKey("captcha", captcha.CaptchaStore)
 
 
@@ -106,6 +107,10 @@ async def index(request: web.Request) -> web.Response:
 
 async def api_state(request: web.Request) -> web.Response:
     user = _auth_user(request)
+    seen: set[int] = request.app[SEEN_USERS]
+    if user.id not in seen:  # открывшие приложение тоже получают рассылки; пишем в базу один раз
+        await request.app[DB].touch_user(user.id)
+        seen.add(user.id)
     return web.json_response(await _state(request.app, user))
 
 
@@ -204,6 +209,7 @@ def create_app(bot: Bot, db: Database, config: Config) -> web.Application:
     app = web.Application()
     app[BOT], app[DB], app[CONFIG] = bot, db, config
     app[CHECK_CACHE] = {}
+    app[SEEN_USERS] = set()
     app[CAPTCHA] = captcha.CaptchaStore()
     app[ASSET_VERSION] = str(int(max(p.stat().st_mtime for p in STATIC_DIR.iterdir())))
 

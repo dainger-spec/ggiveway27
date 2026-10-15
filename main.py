@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import MenuButtonDefault, MenuButtonWebApp
 
+from giveaway.broadcast import Broadcaster
 from giveaway.commands import USER_COMMANDS, set_admin_commands
 from giveaway.config import BASE_DIR, Config, load_config
 from giveaway.database import Database
@@ -51,7 +52,7 @@ def adopt_legacy_db(db_path: str) -> None:
 
 
 def build_dispatcher(config: Config, db: Database) -> Dispatcher:
-    dp = Dispatcher(config=config, db=db)
+    dp = Dispatcher(config=config, db=db, broadcaster=Broadcaster())
     # Порядок важен: админские диалоги должны получать сообщения раньше пользовательских.
     dp.include_routers(chats.router, admin.router, user.router)
     dp.startup.register(set_commands)

@@ -7,7 +7,7 @@ from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatType
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,6 +21,7 @@ from aiogram.types import (
 
 from .. import captcha, media, texts
 from .. import keyboards as kb
+from ..broadcast import Broadcaster, Report
 from ..checker import bot_is_admin, bot_rights, find_missing
 from ..config import Config
 from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Database, Sponsor
@@ -64,14 +65,16 @@ class SetSponsorAvatar(StatesGroup):
 # ---------- Вспомогательное ----------
 
 
-async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> None:
+async def _menu(db: Database, config: Config) -> tuple[str, InlineKeyboardMarkup]:
     sponsors = await db.get_sponsors()
     total = await db.count_participants()
-    await bot.send_message(
-        chat_id,
-        texts.admin_menu(config, sponsors, total),
-        reply_markup=kb.admin_menu_kb(),
-    )
+    new_sponsors = len(await db.unannounced_sponsors())
+    return texts.admin_menu(config, sponsors, total), kb.admin_menu_kb(new_sponsors)
+
+
+async def _send_menu(bot: Bot, chat_id: int, db: Database, config: Config) -> None:
+    text, keyboard = await _menu(db, config)
+    await bot.send_message(chat_id, text, reply_markup=keyboard)
 
 
 async def _sponsor_card(bot: Bot, sponsor: Sponsor) -> tuple[str, InlineKeyboardMarkup]:
@@ -130,9 +133,7 @@ async def cmd_admin(message: Message, state: FSMContext, bot: Bot, db: Database,
 @router.callback_query(kb.AdminCb.filter(F.action == "menu"))
 async def menu(cb: CallbackQuery, state: FSMContext, db: Database, config: Config) -> None:
     await state.clear()
-    sponsors = await db.get_sponsors()
-    total = await db.count_participants()
-    await show(cb, texts.admin_menu(config, sponsors, total), kb.admin_menu_kb())
+    await show(cb, *await _menu(db, config))
     await cb.answer()
 
 
@@ -504,7 +505,7 @@ async def add_url_received(message: Message, state: FSMContext, bot: Bot) -> Non
 
 
 @router.message(AddSponsor.amount, not_command)
-async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db: Database) -> None:
+async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db: Database, config: Config) -> None:
     text = (message.text or "").strip()
     if not text:
         await message.answer("Пришлите сумму текстом.")
@@ -524,6 +525,92 @@ async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db:
     await state.clear()
     await message.answer("✅ Спонсор добавлен!", reply_markup=ReplyKeyboardRemove())
     await _send_sponsor_card(bot, message.chat.id, await db.get_sponsor(sponsor_id))
+    await _offer_broadcast(bot, message.chat.id, db, config)
+
+
+# ---------- Рассылка о новых спонсорах ----------
+
+
+async def _broadcast_screen(db: Database) -> tuple[str, InlineKeyboardMarkup]:
+    sponsors = await db.unannounced_sponsors()
+    recipients = await db.broadcast_recipients()
+    with_number = sum(1 for _, number in recipients if number is not None)
+    return (
+        texts.broadcast_prompt(sponsors, len(recipients), with_number),
+        kb.broadcast_kb(len(recipients) if sponsors else None),
+    )
+
+
+async def _offer_broadcast(bot: Bot, chat_id: int, db: Database, config: Config) -> None:
+    """После добавления спонсора предлагает сообщить о нём пользователям — если есть кому."""
+    recipients = await db.broadcast_recipients()
+    if not any(user_id not in config.admin_ids for user_id, _ in recipients):
+        # Бота ещё никто не запускал: новые пользователи и так увидят всех спонсоров в /start.
+        await db.mark_announced([s.id for s in await db.unannounced_sponsors()])
+        return
+    text, keyboard = await _broadcast_screen(db)
+    await bot.send_message(chat_id, text, reply_markup=keyboard)
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bc"))
+async def broadcast_menu(cb: CallbackQuery, state: FSMContext, db: Database, broadcaster: Broadcaster) -> None:
+    await state.clear()
+    if broadcaster.running:
+        await show(cb, "📣 Рассылка уже идёт — прогресс в сообщении выше.", kb.broadcast_stop_kb())
+    else:
+        await show(cb, *await _broadcast_screen(db))
+    await cb.answer()
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bc_preview"))
+async def broadcast_preview(cb: CallbackQuery, bot: Bot, db: Database, config: Config) -> None:
+    sponsors = await db.unannounced_sponsors()
+    if not sponsors:
+        await cb.answer("Новых спонсоров нет", show_alert=True)
+        return
+    await cb.answer()
+    participant = await db.get_participant(cb.from_user.id)
+    number = participant.number if participant else None
+    await bot.send_message(
+        cb.from_user.id,
+        texts.new_sponsors(sponsors, config.giveaway_name, number),
+        reply_markup=kb.new_sponsors_kb(sponsors, config.webapp_url),
+    )
+    text, keyboard = await _broadcast_screen(db)
+    await bot.send_message(cb.from_user.id, "☝️ Так выглядит сообщение.\n\n" + text, reply_markup=keyboard)
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bc_go"))
+async def broadcast_go(cb: CallbackQuery, bot: Bot, db: Database, config: Config, broadcaster: Broadcaster) -> None:
+    if broadcaster.running:
+        await cb.answer("Рассылка уже идёт — дождитесь окончания", show_alert=True)
+        return
+    sponsors = await db.unannounced_sponsors()
+    if not sponsors:
+        await cb.answer("Обо всех спонсорах уже сообщили", show_alert=True)
+        await show(cb, *await _broadcast_screen(db))
+        return
+    recipients = await db.broadcast_recipients()
+    progress = texts.broadcast_progress(Report(total=len(recipients)))
+    status = None
+    if isinstance(cb.message, Message):
+        try:
+            await cb.message.edit_text(progress, reply_markup=kb.broadcast_stop_kb())
+            status = (cb.message.chat.id, cb.message.message_id)
+        except TelegramBadRequest:
+            pass
+    if status is None:
+        sent = await bot.send_message(cb.from_user.id, progress, reply_markup=kb.broadcast_stop_kb())
+        status = (sent.chat.id, sent.message_id)
+    if broadcaster.start(bot, db, config, sponsors, recipients, status):
+        await cb.answer("Рассылка запущена")
+    else:
+        await cb.answer("Рассылка уже идёт", show_alert=True)
+
+
+@router.callback_query(kb.AdminCb.filter(F.action == "bc_stop"))
+async def broadcast_stop(cb: CallbackQuery, broadcaster: Broadcaster) -> None:
+    await cb.answer("Останавливаю рассылку…" if broadcaster.stop() else "Рассылка уже закончилась")
 
 
 # ---------- Оформление мини-приложения ----------

@@ -9,8 +9,10 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from .database import KIND_CHANNEL, KIND_CHAT, Sponsor
+from .database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Sponsor
 from .texts import KIND_ICONS
+
+KIND_BUTTONS = {KIND_CHANNEL: "Подписаться", KIND_CHAT: "Вступить", KIND_BOT: "Запустить"}
 
 CHECK_CB = "check_subs"
 
@@ -22,7 +24,7 @@ REMOVE_AMOUNT_TEXT = "🚫 Убрать сумму"
 
 
 class AdminCb(CallbackData, prefix="adm"):
-    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | captcha
+    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | captcha | bc | bc_*
 
 
 class KindCb(CallbackData, prefix="kind"):  # только чтобы старые кнопки «Канал/Чат/Бот» не зависали
@@ -86,18 +88,54 @@ def sponsors_kb(sponsors: list[Sponsor], webapp_url: str | None = None) -> Inlin
     return b.as_markup()
 
 
+def new_sponsors_kb(sponsors: list[Sponsor], webapp_url: str | None) -> InlineKeyboardMarkup:
+    """Кнопки к рассылке: ссылка на каждого нового спонсора, приложение и проверка."""
+    b = InlineKeyboardBuilder()
+    for s in sponsors:
+        title = s.title if len(s.title) <= 32 else s.title[:31] + "…"
+        b.button(text=f"{KIND_ICONS[s.kind]} {KIND_BUTTONS[s.kind]}: {title}", url=s.url)
+    if webapp_url:
+        b.button(text=WEBAPP_TEXT, web_app=webapp_info(webapp_url))
+    b.button(text="✅ Проверить подписку", callback_data=CHECK_CB)
+    b.adjust(1)
+    return b.as_markup()
+
+
 # ---------- Админка ----------
 
 
-def admin_menu_kb() -> InlineKeyboardMarkup:
+def admin_menu_kb(new_sponsors: int = 0) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="📋 Спонсоры", callback_data=AdminCb(action="sponsors"))
     b.button(text="➕ Добавить спонсора", callback_data=AdminCb(action="add"))
     b.button(text="👥 Участники", callback_data=PageCb(page=0))
     b.button(text="🔎 Найти участника", callback_data=AdminCb(action="find"))
     b.button(text="📥 Выгрузить участников (CSV)", callback_data=AdminCb(action="export"))
+    b.button(
+        text=f"📣 Рассылка о новых спонсорах ({new_sponsors})" if new_sponsors else "📣 Рассылка",
+        callback_data=AdminCb(action="bc"),
+    )
     b.button(text="⚙️ Настройки приложения", callback_data=AdminCb(action="bg"))
-    b.adjust(2, 2, 1, 1)
+    b.adjust(2, 2, 1, 1, 1)
+    return b.as_markup()
+
+
+def broadcast_kb(recipients: int | None) -> InlineKeyboardMarkup:
+    """recipients — сколько людей получат рассылку; None — рассылать нечего."""
+    b = InlineKeyboardBuilder()
+    if recipients is not None:
+        b.button(text=f"📣 Разослать ({recipients})", callback_data=AdminCb(action="bc_go"))
+        b.button(text="👀 Как это увидят", callback_data=AdminCb(action="bc_preview"))
+        b.button(text="« Позже", callback_data=AdminCb(action="menu"))
+        b.adjust(1, 2)
+    else:
+        b.button(text="« В меню", callback_data=AdminCb(action="menu"))
+    return b.as_markup()
+
+
+def broadcast_stop_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⏹ Остановить рассылку", callback_data=AdminCb(action="bc_stop"))
     return b.as_markup()
 
 

@@ -27,6 +27,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot, db: Database,
         await state.clear()
         await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
 
+    await db.touch_user(message.from_user.id)
     participant = await db.get_participant(message.from_user.id)
     sponsors = await db.get_sponsors()
     if participant is not None:
@@ -50,12 +51,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot, db: Database,
 @router.callback_query(F.data == CHECK_CB)
 async def check_subscriptions(cb: CallbackQuery, bot: Bot, db: Database, config: Config) -> None:
     user = cb.from_user
-
-    participant = await db.get_participant(user.id)
-    if participant is not None:
-        await show(cb, texts.already_participant(participant.number, config.giveaway_name))
-        await cb.answer()
-        return
+    await db.touch_user(user.id)
 
     now = time.monotonic()
     if now - _last_check.get(user.id, 0.0) < CHECK_COOLDOWN:
@@ -63,7 +59,19 @@ async def check_subscriptions(cb: CallbackQuery, bot: Bot, db: Database, config:
         return
     _last_check[user.id] = now
 
+    participant = await db.get_participant(user.id)
     sponsors = await db.get_sponsors()
+    if participant is not None:
+        # Номер уже есть; если после рассылки добавились спонсоры — подсказываем, на кого подписаться.
+        missing = await find_missing(bot, db, sponsors, user.id)
+        if missing:
+            await show(cb, texts.missing(missing, participant.number), sponsors_kb(missing, config.webapp_url))
+            await cb.answer("Есть новые условия")
+        else:
+            await show(cb, texts.already_participant(participant.number, config.giveaway_name))
+            await cb.answer("✅ Всё выполнено")
+        return
+
     if not sponsors:
         await show(cb, texts.no_sponsors(config.giveaway_name))
         await cb.answer()
