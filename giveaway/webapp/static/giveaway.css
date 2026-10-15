@@ -933,67 +933,44 @@ button:focus-visible {
   font-size: 14px;
 }
 
-/* «Вставь кусочек пазла»: картинка и ползунок */
-.puzzle__frame {
-  position: relative;
-  overflow: hidden;
-  border-radius: 14px;
+/* Слово с картинки: картинка и поле для ответа */
+.wordcap {
+  display: grid;
+  gap: 12px;
 }
 
-.puzzle__bg {
+.wordcap__img {
   display: block;
   width: 100%;
-  height: 100%;
+  aspect-ratio: 520 / 200;
+  border-radius: 14px;
+  background: var(--glass);
+  object-fit: cover;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.puzzle__piece {
-  position: absolute;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
-  pointer-events: none;
-}
-
-.puzzle__range {
-  display: block;
+.wordcap__input {
   width: 100%;
-  height: 48px;
-  margin: 14px 0 0;
-  background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
+  height: 54px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  color: var(--ink);
+  font: 600 18px/1 var(--font-body);
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 0.2s ease;
 }
 
-.puzzle__range::-webkit-slider-runnable-track {
-  height: 8px;
-  border-radius: var(--pill);
-  background: var(--glass-2);
+.wordcap__input:focus {
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
-.puzzle__range::-webkit-slider-thumb {
-  width: 46px;
-  height: 46px;
-  margin-top: -19px;
-  border-radius: 50%;
-  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0d1a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / 22px no-repeat;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.puzzle__range::-moz-range-track {
-  height: 8px;
-  border-radius: var(--pill);
-  background: var(--glass-2);
-}
-
-.puzzle__range::-moz-range-thumb {
-  width: 46px;
-  height: 46px;
-  border: 0;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+.wordcap__input::placeholder {
+  color: var(--ink-3);
+  font-weight: 500;
 }
 
 /* ---------- Уведомления ---------- */

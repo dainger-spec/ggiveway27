@@ -94,8 +94,9 @@
       </div>
       <p class="sheet__text" id="captchaHint">Докажи, что ты не бот.</p>
       <div class="captcha" id="captchaBody"></div>
-      <div class="sheet__actions is-single">
+      <div class="sheet__actions">
         <button class="cta cta--ghost" id="captchaRefresh" type="button">Другая картинка</button>
+        <button class="cta" id="captchaSubmit" type="button" disabled>Готово</button>
       </div>
     </div>
   </div>
@@ -626,7 +627,7 @@
 
       // ---------- Капча ----------
 
-      let captcha = null; // { data }
+      let captcha = null; // { data, input }
 
       function captchaOpen() {
         return !$("captchaSheet").hidden;
@@ -642,6 +643,7 @@
         $("captchaSheet").hidden = false;
         document.documentElement.classList.add("sheet-open");
         $("captchaHint").textContent = "Докажи, что ты не бот — и номер твой.";
+        $("captchaSubmit").disabled = true;
         $("captchaBody").replaceChildren(el("div", "captcha__loading", "Загружаем картинку…"));
         try {
           const { status, body } = await api("api/captcha", "POST");
@@ -665,51 +667,52 @@
       }
 
       function renderCaptcha(data) {
-        captcha = { data };
-        $("captchaHint").textContent = "Передвинь ползунок, чтобы кусочек пазла встал на своё место.";
-        $("captchaBody").replaceChildren(buildPuzzle(data));
+        $("captchaHint").textContent = "Напиши слово с картинки — большие и маленькие буквы не важны.";
+        const img = new Image();
+        img.className = "wordcap__img";
+        img.alt = "Слово для проверки";
+        img.draggable = false;
+        img.src = data.image;
+
+        const input = document.createElement("input");
+        input.className = "wordcap__input";
+        input.type = "text";
+        input.placeholder = "Слово с картинки";
+        input.autocomplete = "off";
+        input.autocapitalize = "off";
+        input.spellcheck = false;
+        input.lang = "ru";
+        input.maxLength = 24;
+        input.enterKeyHint = "done";
+        input.setAttribute("aria-label", "Слово с картинки");
+        input.addEventListener("input", () => {
+          $("captchaSubmit").disabled = !input.value.trim();
+        });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            sendWord();
+          }
+        });
+
+        captcha = { data, input };
+        const wrap = el("div", "wordcap");
+        wrap.append(img, input);
+        $("captchaBody").replaceChildren(wrap);
+        $("captchaSubmit").disabled = true;
+        input.focus({ preventScroll: true });
       }
 
-      function buildPuzzle(data) {
-        const frame = el("div", "puzzle__frame");
-        frame.style.aspectRatio = `${data.width} / ${data.height}`;
-        const bg = new Image();
-        bg.className = "puzzle__bg";
-        bg.alt = "";
-        bg.draggable = false;
-        bg.src = data.background;
-        const piece = new Image();
-        piece.className = "puzzle__piece";
-        piece.alt = "";
-        piece.draggable = false;
-        piece.src = data.piece.url;
-        piece.style.width = `${(data.piece.width / data.width) * 100}%`;
-        piece.style.top = `${(data.piece.y / data.height) * 100}%`;
-        piece.style.left = "0%";
-        frame.append(bg, piece);
-
-        const range = document.createElement("input");
-        range.type = "range";
-        range.className = "puzzle__range";
-        range.min = "0";
-        range.max = String(data.max);
-        range.step = "1";
-        range.value = "0";
-        range.setAttribute("aria-label", "Положение кусочка пазла");
-        range.addEventListener("input", () => {
-          piece.style.left = `${(Number(range.value) / data.width) * 100}%`;
-        });
-        range.addEventListener("change", () => submitCaptcha(Number(range.value)));
-
-        const wrap = el("div", "puzzle");
-        wrap.append(frame, range);
-        return wrap;
+      function sendWord() {
+        const word = captcha && captcha.input.value.trim();
+        if (word) submitCaptcha(word);
       }
 
       async function submitCaptcha(answer) {
         if (!captcha) return;
         const body = $("captchaBody");
         body.classList.add("is-busy");
+        $("captchaSubmit").disabled = true;
         try {
           const res = await api("api/join", "POST", { captcha_id: captcha.data.id, answer });
           if (res.status === 422) {
@@ -718,7 +721,7 @@
             panel.classList.remove("is-shake");
             void panel.offsetWidth;
             panel.classList.add("is-shake");
-            toast("Не совсем так — вот новая картинка");
+            toast("Неверно — вот новое слово");
             await startCaptcha();
             return;
           }
@@ -803,6 +806,7 @@
         $("btnBack").addEventListener("click", () => go("welcome"));
         $("btnGetNumber").addEventListener("click", getNumber);
         $("captchaRefresh").addEventListener("click", startCaptcha);
+        $("captchaSubmit").addEventListener("click", sendWord);
         document.querySelectorAll("[data-close]").forEach((node) => node.addEventListener("click", closeCaptcha));
         $("btnShowSponsors").addEventListener("click", () => go("sponsors"));
         $("btnClose").addEventListener("click", () => {

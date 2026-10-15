@@ -49,7 +49,7 @@ class RecheckCb(CallbackData, prefix="rc"):
 
 
 class CaptchaCb(CallbackData, prefix="cc"):
-    action: str  # pick | new
+    action: str  # new; pick — кнопки с числами из прошлой версии
     id: str  # код картинки: кнопки старых картинок не срабатывают
     option: int = -1
 
@@ -69,13 +69,15 @@ def webapp_info(webapp_url: str) -> WebAppInfo:
     return WebAppInfo(url=webapp_url + "/")
 
 
-def captcha_kb(challenge_id: str, options: list[str]) -> InlineKeyboardMarkup:
-    """Числа под картинкой капчи — по три в ряд — и «Другая картинка»."""
+def captcha_kb(challenge_id: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    for i, number in enumerate(options):
-        b.button(text=number, callback_data=CaptchaCb(action="pick", id=challenge_id, option=i))
-    b.button(text="🔄 Другая картинка", callback_data=CaptchaCb(action="new", id=challenge_id))
-    b.adjust(3, 3, 1)
+    b.button(text="🔄 Другое слово", callback_data=CaptchaCb(action="new", id=challenge_id))
+    return b.as_markup()
+
+
+def check_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Проверить подписку", callback_data=CHECK_CB)
     return b.as_markup()
 
 

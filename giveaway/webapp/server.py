@@ -126,17 +126,17 @@ async def api_captcha(request: web.Request) -> web.Response:
     if await app[DB].get_participant(user.id) is not None or not await _conditions_met(app, user.id):
         return web.json_response(await _state(app, user), status=409)
     try:
-        challenge = await app[CAPTCHA].issue(user.id)
+        challenge, _ = await app[CAPTCHA].issue(user.id)
     except captcha.CaptchaRateLimited:
         return web.json_response({"error": "Слишком много попыток. Подожди пару минут и попробуй снова."}, status=429)
-    return web.json_response(challenge)
+    return web.json_response({"id": challenge.id, "image": f"captcha/{challenge.id}.jpg"})
 
 
-async def captcha_file(request: web.Request) -> web.Response:
-    data = request.app[CAPTCHA].file(request.match_info["cid"], request.match_info["name"])
+async def captcha_image(request: web.Request) -> web.Response:
+    data = request.app[CAPTCHA].image(request.match_info["cid"])
     if data is None:
         raise web.HTTPNotFound()
-    return web.Response(body=data, content_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
 async def api_join(request: web.Request) -> web.Response:
@@ -157,7 +157,7 @@ async def api_join(request: web.Request) -> web.Response:
             except ValueError:
                 body = {}
             body = body if isinstance(body, dict) else {}
-            if not app[CAPTCHA].verify(user.id, str(body.get("captcha_id", "")), body.get("answer")):
+            if not app[CAPTCHA].verify(user.id, body.get("answer"), str(body.get("captcha_id", ""))):
                 return web.json_response({"error": "captcha"}, status=422)
         full_name = " ".join(filter(None, (user.first_name, user.last_name)))
         participant, created = await db.register_participant(user.id, user.username, full_name)
@@ -210,7 +210,7 @@ def create_app(bot: Bot, db: Database, config: Config) -> web.Application:
     app[BOT], app[DB], app[CONFIG] = bot, db, config
     app[CHECK_CACHE] = {}
     app[SEEN_USERS] = set()
-    app[CAPTCHA] = captcha.CaptchaStore()
+    app[CAPTCHA] = captcha.CaptchaStore(captcha.TTL, keep_images=True)
     app[ASSET_VERSION] = str(int(max(p.stat().st_mtime for p in STATIC_DIR.iterdir())))
 
     app.router.add_get("/", index)
@@ -218,7 +218,7 @@ def create_app(bot: Bot, db: Database, config: Config) -> web.Application:
     app.router.add_get("/api/state", api_state)
     app.router.add_post("/api/join", api_join)
     app.router.add_post("/api/captcha", api_captcha)
-    app.router.add_get("/captcha/{cid}/{name}.png", captcha_file)
+    app.router.add_get("/captcha/{cid}.jpg", captcha_image)
     app.router.add_get("/media/background", media_background)
     app.router.add_get("/media/avatar/{sponsor_id}", media_avatar)
     app.router.add_get("/media/sponsor/{sponsor_id}", media_sponsor_background)
