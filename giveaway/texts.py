@@ -102,19 +102,17 @@ def admin_menu(config: Config, sponsors: list[Sponsor], participants: int) -> st
     )
 
 
-def appearance_status(background: Background | None, new_year: bool, captcha: bool, webapp_url: str | None) -> str:
+def appearance_status(background: Background | None, captcha: bool, webapp_url: str | None) -> str:
     kinds = {"image": "картинка", "video": "видео / GIF"}
     current = f"загружен ({kinds.get(background.kind, background.kind)})" if background else "не задан"
     lines = [
         "⚙️ <b>Настройки мини-приложения</b>",
         "",
         f"🖼 Фон: <b>{current}</b>",
-        f"🎄 Новогодняя тема: <b>{'включена' if new_year else 'выключена'}</b>",
         f"🧩 Капча перед выдачей номера: <b>{'включена' if captcha else 'выключена'}</b>",
         "",
         "Фон растягивается на весь экран и слегка затемняется, чтобы текст хорошо читался. "
         "Подойдёт картинка, GIF или видео до 20 МБ.",
-        "Новогодняя тема — зимний синий фон (если свой фон не загружен).",
         "Капча — собрать картинку или вставить кусочек пазла; защищает розыгрыш от ботов и накруток.",
     ]
     if not webapp_url:

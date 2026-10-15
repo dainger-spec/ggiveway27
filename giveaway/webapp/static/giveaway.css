@@ -1,6 +1,6 @@
 /* Layout: одна колонка стеклянных капсул поверх затемнённого фона; мотив — кольцо из 12 звёзд флага ЕС */
 :root {
-  --night: #060914;
+  --night: #000000;
   --eu-blue: #1f43b0;
   --gold: #ffcc33;
   --gold-hi: #ffe38f;
@@ -70,10 +70,7 @@ button:focus-visible {
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background:
-    radial-gradient(120% 70% at 50% -12%, rgba(31, 67, 176, 0.6), transparent 62%),
-    radial-gradient(90% 55% at 50% 112%, rgba(255, 204, 51, 0.14), transparent 70%),
-    var(--night);
+  background: var(--night);
 }
 
 .backdrop__media > img,
@@ -105,9 +102,9 @@ button:focus-visible {
   inset: 0;
   background: linear-gradient(
     180deg,
-    rgba(4, 6, 16, 0.52) 0%,
-    rgba(4, 6, 16, 0.4) 38%,
-    rgba(4, 6, 16, 0.8) 100%
+    rgba(0, 0, 0, 0.52) 0%,
+    rgba(0, 0, 0, 0.4) 38%,
+    rgba(0, 0, 0, 0.8) 100%
   );
 }
 
@@ -200,7 +197,7 @@ button:focus-visible {
   position: absolute;
   inset: 13%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(6, 9, 20, 0.62) 0%, rgba(6, 9, 20, 0.28) 62%, transparent 72%);
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.28) 62%, transparent 72%);
 }
 
 .prize__ring {
@@ -641,7 +638,7 @@ button:focus-visible {
 .capsule__shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(4, 6, 16, 0.84) 0%, rgba(4, 6, 16, 0.62) 52%, rgba(4, 6, 16, 0.34) 100%);
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.84) 0%, rgba(0, 0, 0, 0.62) 52%, rgba(0, 0, 0, 0.34) 100%);
   transition: background 0.6s ease;
 }
 
@@ -724,7 +721,7 @@ button:focus-visible {
   max-width: 520px;
   margin: 0 auto;
   padding: 26px var(--gutter) calc(var(--safe-bottom) + 16px);
-  background: linear-gradient(180deg, transparent, rgba(4, 6, 16, 0.88) 38%);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.9) 38%);
 }
 
 .dock__hint {
@@ -832,7 +829,7 @@ button:focus-visible {
 .sheet__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(2, 4, 12, 0.66);
+  background: rgba(0, 0, 0, 0.66);
   animation: fade-in 0.25s ease;
 }
 
@@ -844,7 +841,7 @@ button:focus-visible {
   border: 1px solid var(--line);
   border-bottom: 0;
   border-radius: 26px 26px 0 0;
-  background: #0d1430;
+  background: #111111;
   animation: sheet-up 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -1097,13 +1094,4 @@ button:focus-visible {
   .burst {
     display: none;
   }
-}
-
-/* ---------- Новогодняя тема ---------- */
-
-/* Зимняя ночь: мягкий холодный отсвет сверху, если фон не загружен */
-.theme-new-year .backdrop:not(.has-media) {
-  background:
-    radial-gradient(110% 60% at 50% -12%, rgba(60, 130, 220, 0.45), transparent 62%),
-    linear-gradient(180deg, #040918 0%, #08142f 100%);
 }

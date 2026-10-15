@@ -204,17 +204,6 @@
         node.innerHTML = `<svg viewBox="-50 -50 100 100" aria-hidden="true">${paths}</svg>`;
       }
 
-      // ---------- Новогодняя тема ----------
-
-      let themeKey = "";
-      function applyTheme(theme) {
-        const newYear = Boolean(theme && theme.new_year);
-        const key = String(newYear);
-        if (key === themeKey) return;
-        themeKey = key;
-        document.documentElement.classList.toggle("theme-new-year", newYear);
-      }
-
       // ---------- API ----------
 
       async function api(path, method = "GET", data = null) {
@@ -840,7 +829,6 @@
       // ---------- Запуск ----------
 
       function render() {
-        applyTheme(state.theme);
         applyBackground(state.background);
         renderWelcome();
         renderSponsors();
@@ -852,9 +840,9 @@
         tg.ready();
         tg.expand();
         for (const call of [
-          () => tg.setHeaderColor("#060914"),
-          () => tg.setBackgroundColor("#060914"),
-          () => tg.setBottomBarColor && tg.setBottomBarColor("#060914"),
+          () => tg.setHeaderColor("#000000"),
+          () => tg.setBackgroundColor("#000000"),
+          () => tg.setBottomBarColor && tg.setBottomBarColor("#000000"),
           () => tg.disableVerticalSwipes && tg.disableVerticalSwipes(),
         ]) {
           try {
