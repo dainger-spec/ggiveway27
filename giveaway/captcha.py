@@ -2,6 +2,7 @@
 
 Картинки каждый раз рисуются заново. Правильный ответ хранится только на сервере:
 кусочки приходят под случайными кодами, а место выемки в пазле клиенту не сообщается.
+В чате с ботом — та же «собери картинку»: фото с перемешанными кусочками и кнопки под ним.
 """
 
 import asyncio
@@ -11,7 +12,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 SETTING = "captcha"  # «1» — капча включена (по умолчанию)
 
@@ -23,6 +24,10 @@ TILES_SIZE = 300
 SLIDER_W, SLIDER_H = 300, 180
 PIECE, KNOB = 46, 9  # сторона кусочка пазла и радиус «ушка»
 TOLERANCE = 6  # на сколько пикселей можно промахнуться
+
+CHAT_TTL = 600  # в чате даём больше времени: каждый ход — это сообщение
+CHAT_TILE = 110  # сторона кусочка на фото в чате
+CHAT_PASS_TTL = 600  # прошедшему капчу в чате не нужно проходить её снова, если сразу отписался и вернулся
 
 PALETTES = [
     ((255, 94, 98), (255, 195, 113)),
@@ -40,6 +45,24 @@ PALETTES = [
 
 class CaptchaRateLimited(Exception):
     pass
+
+
+class _RateLimit:
+    """Не больше MAX_PER_WINDOW новых капч за WINDOW секунд на человека."""
+
+    def __init__(self) -> None:
+        self._issued: dict[int, list[float]] = {}
+
+    def hit(self, user_id: int) -> None:
+        now = time.monotonic()
+        for uid in list(self._issued):
+            self._issued[uid] = [t for t in self._issued[uid] if now - t < WINDOW]
+            if not self._issued[uid]:
+                del self._issued[uid]
+        recent = self._issued.setdefault(user_id, [])
+        if len(recent) >= MAX_PER_WINDOW:
+            raise CaptchaRateLimited
+        recent.append(now)
 
 
 @dataclass
@@ -166,25 +189,17 @@ class CaptchaStore:
     def __init__(self) -> None:
         self._items: dict[str, Challenge] = {}
         self._by_user: dict[int, str] = {}
-        self._issued: dict[int, list[float]] = {}
+        self._limit = _RateLimit()
 
     def _cleanup(self) -> None:
         for cid in [cid for cid, ch in self._items.items() if ch.expired]:
             ch = self._items.pop(cid)
             if self._by_user.get(ch.user_id) == cid:
                 del self._by_user[ch.user_id]
-        now = time.monotonic()
-        for user_id in list(self._issued):
-            self._issued[user_id] = [t for t in self._issued[user_id] if now - t < WINDOW]
-            if not self._issued[user_id]:
-                del self._issued[user_id]
 
     async def issue(self, user_id: int, kind: str | None = None) -> dict:
         self._cleanup()
-        recent = self._issued.setdefault(user_id, [])
-        if len(recent) >= MAX_PER_WINDOW:
-            raise CaptchaRateLimited
-        recent.append(time.monotonic())
+        self._limit.hit(user_id)
 
         cid = secrets.token_urlsafe(16)
         rng = random.Random(secrets.randbits(64))
@@ -219,3 +234,126 @@ class CaptchaStore:
             return abs(float(answer) - challenge.answer) <= TOLERANCE
         except (TypeError, ValueError):
             return False
+
+
+# ---------- «Собери картинку» в чате с ботом ----------
+
+
+def _jpeg(img: Image.Image, quality: int = 90) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
+def _shuffled(rng: random.Random) -> list[int]:
+    order = list(range(GRID * GRID))
+    while sum(a == b for a, b in enumerate(order)) > 2:  # почти все кусочки не на своих местах
+        rng.shuffle(order)
+    return order
+
+
+def _render_board(art_jpeg: bytes, order: list[int]) -> bytes:
+    """Поле 3×3 с номерами клеток (как на кнопках) и образец справа."""
+    s = 2  # рисуем в двойном размере, чтобы в Telegram было чётко
+    tile, gap, pad, sample = CHAT_TILE * s, 6 * s, 14 * s, 150 * s
+    board = GRID * tile + (GRID - 1) * gap
+    canvas = Image.new("RGB", (pad + board + pad + sample + pad, pad + board + pad), (17, 17, 17))
+    art = Image.open(io.BytesIO(art_jpeg)).convert("RGB")
+
+    tile_mask = Image.new("L", (tile, tile), 0)
+    ImageDraw.Draw(tile_mask).rounded_rectangle((0, 0, tile - 1, tile - 1), radius=8 * s, fill=255)
+    badge = 30 * s
+    font = ImageFont.load_default(size=19 * s)
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for pos, piece in enumerate(order):
+        x, y = pad + (pos % GRID) * (tile + gap), pad + (pos // GRID) * (tile + gap)
+        sx, sy = (piece % GRID) * tile, (piece // GRID) * tile
+        canvas.paste(art.crop((sx, sy, sx + tile, sy + tile)), (x, y), tile_mask)
+        bx, by = x + 7 * s, y + 7 * s
+        draw.ellipse((bx, by, bx + badge, by + badge), fill=(0, 0, 0, 165))
+        draw.text((bx + badge / 2, by + badge / 2), str(pos + 1), font=font, fill=(255, 255, 255, 255), anchor="mm")
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+
+    sample_mask = Image.new("L", (sample, sample), 0)
+    ImageDraw.Draw(sample_mask).rounded_rectangle((0, 0, sample - 1, sample - 1), radius=10 * s, fill=255)
+    sample_x = pad + board + pad
+    canvas.paste(art.resize((sample, sample), Image.LANCZOS), (sample_x, pad), sample_mask)
+    ImageDraw.Draw(canvas).rounded_rectangle(
+        (sample_x, pad, sample_x + sample - 1, pad + sample - 1), radius=10 * s, outline=(255, 255, 255), width=s
+    )
+    return _jpeg(canvas)
+
+
+@dataclass
+class ChatPuzzle:
+    id: str
+    user_id: int
+    art: bytes  # картинка целиком (JPEG — так меньше памяти, чем держать её открытой)
+    order: list[int]  # order[клетка] — какой кусочек сейчас в этой клетке
+    selected: int | None = None
+    created: float = field(default_factory=time.monotonic)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # нажатия одного человека — по очереди
+
+    @property
+    def expired(self) -> bool:
+        return time.monotonic() - self.created > CHAT_TTL
+
+    @property
+    def solved(self) -> bool:
+        return self.order == list(range(GRID * GRID))
+
+    def tap(self, pos: int) -> bool:
+        """Нажатие на клетку. True — два кусочка поменялись местами (картинку нужно перерисовать)."""
+        if not 0 <= pos < GRID * GRID:
+            return False
+        if self.selected is None:
+            self.selected = pos
+            return False
+        first, self.selected = self.selected, None
+        if first == pos:
+            return False
+        self.order[first], self.order[pos] = self.order[pos], self.order[first]
+        return True
+
+    async def render(self) -> bytes:
+        return await asyncio.to_thread(_render_board, self.art, list(self.order))
+
+
+def _make_chat_puzzle(cid: str, user_id: int, rng: random.Random) -> ChatPuzzle:
+    side = GRID * CHAT_TILE * 2
+    return ChatPuzzle(cid, user_id, _jpeg(_art(side, side, rng), quality=92), _shuffled(rng))
+
+
+class ChatCaptchaStore:
+    """Капчи в чате с ботом: одна на человека, в памяти процесса."""
+
+    def __init__(self) -> None:
+        self._items: dict[int, ChatPuzzle] = {}
+        self._passed: dict[int, float] = {}
+        self._limit = _RateLimit()
+
+    async def issue(self, user_id: int) -> ChatPuzzle:
+        now = time.monotonic()
+        for uid in [uid for uid, p in self._items.items() if p.expired]:
+            del self._items[uid]
+        for uid in [uid for uid, t in self._passed.items() if now - t > CHAT_PASS_TTL]:
+            del self._passed[uid]
+        self._limit.hit(user_id)
+        rng = random.Random(secrets.randbits(64))
+        puzzle = await asyncio.to_thread(_make_chat_puzzle, secrets.token_urlsafe(6), user_id, rng)
+        self._items[user_id] = puzzle
+        return puzzle
+
+    def get(self, user_id: int, cid: str) -> ChatPuzzle | None:
+        """Капча этого человека с этим кодом (кнопки старых картинок не подходят)."""
+        puzzle = self._items.get(user_id)
+        return puzzle if puzzle is not None and puzzle.id == cid else None
+
+    def solve(self, user_id: int) -> None:
+        self._items.pop(user_id, None)
+        self._passed[user_id] = time.monotonic()
+
+    def recently_passed(self, user_id: int) -> bool:
+        passed = self._passed.get(user_id)
+        return passed is not None and time.monotonic() - passed <= CHAT_PASS_TTL

@@ -48,6 +48,12 @@ class RecheckCb(CallbackData, prefix="rc"):
     user_id: int
 
 
+class PuzzleCb(CallbackData, prefix="pz"):
+    action: str  # tap | new
+    id: str  # код картинки: кнопки старых картинок не срабатывают
+    pos: int = -1
+
+
 def _sponsor_button_text(s: Sponsor) -> str:
     title = s.title if len(s.title) <= 40 else s.title[:39] + "…"
     text = f"{KIND_ICONS[s.kind]} {title}"
@@ -63,9 +69,16 @@ def webapp_info(webapp_url: str) -> WebAppInfo:
     return WebAppInfo(url=webapp_url + "/")
 
 
-def captcha_kb(webapp_url: str) -> InlineKeyboardMarkup:
+def puzzle_kb(puzzle_id: str, selected: int | None) -> InlineKeyboardMarkup:
+    """Кнопки 3×3 — как клетки на картинке; выбранная подсвечена."""
     b = InlineKeyboardBuilder()
-    b.button(text="🧩 Пройти проверку", web_app=WebAppInfo(url=webapp_url + "/?captcha=1"))
+    for pos in range(9):
+        b.button(
+            text=f"🟡 {pos + 1}" if pos == selected else str(pos + 1),
+            callback_data=PuzzleCb(action="tap", id=puzzle_id, pos=pos),
+        )
+    b.button(text="🔄 Другая картинка", callback_data=PuzzleCb(action="new", id=puzzle_id))
+    b.adjust(3, 3, 3, 1)
     return b.as_markup()
 
 
