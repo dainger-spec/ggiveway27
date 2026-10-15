@@ -94,9 +94,8 @@
       </div>
       <p class="sheet__text" id="captchaHint">Докажи, что ты не бот.</p>
       <div class="captcha" id="captchaBody"></div>
-      <div class="sheet__actions" id="captchaActions">
+      <div class="sheet__actions is-single">
         <button class="cta cta--ghost" id="captchaRefresh" type="button">Другая картинка</button>
-        <button class="cta" id="captchaSubmit" type="button">Готово</button>
       </div>
     </div>
   </div>
@@ -627,7 +626,7 @@
 
       // ---------- Капча ----------
 
-      let captcha = null; // { data, order, selected }
+      let captcha = null; // { data }
 
       function captchaOpen() {
         return !$("captchaSheet").hidden;
@@ -643,8 +642,6 @@
         $("captchaSheet").hidden = false;
         document.documentElement.classList.add("sheet-open");
         $("captchaHint").textContent = "Докажи, что ты не бот — и номер твой.";
-        $("captchaSubmit").hidden = true;
-        $("captchaActions").classList.add("is-single");
         $("captchaBody").replaceChildren(el("div", "captcha__loading", "Загружаем картинку…"));
         try {
           const { status, body } = await api("api/captcha", "POST");
@@ -668,65 +665,9 @@
       }
 
       function renderCaptcha(data) {
-        const tiles = data.kind === "tiles";
-        captcha = { data, order: tiles ? data.tiles.map((t) => t.id) : null, selected: null };
-        $("captchaHint").textContent = tiles
-          ? "Собери картинку по образцу: нажимай на два кусочка, чтобы поменять их местами."
-          : "Передвинь ползунок, чтобы кусочек пазла встал на своё место.";
-        $("captchaSubmit").hidden = !tiles;
-        $("captchaSubmit").disabled = false;
-        $("captchaActions").classList.toggle("is-single", !tiles);
-        $("captchaBody").replaceChildren(tiles ? buildTiles(data) : buildPuzzle(data));
-      }
-
-      function buildTiles(data) {
-        const grid = el("div", "tiles__grid");
-        grid.style.setProperty("--grid", data.grid);
-        const buttons = new Map();
-        for (const tile of data.tiles) {
-          const btn = el("button", "tile");
-          btn.type = "button";
-          const img = new Image();
-          img.alt = "";
-          img.draggable = false;
-          img.src = tile.url;
-          btn.append(img);
-          btn.addEventListener("click", () => onTile(tile.id));
-          buttons.set(tile.id, btn);
-        }
-        const draw = () => {
-          captcha.order.forEach((id, i) => {
-            const btn = buttons.get(id);
-            btn.classList.toggle("is-selected", id === captcha.selected);
-            btn.setAttribute("aria-label", `Кусочек на месте ${i + 1}`);
-            grid.append(btn); // переставляем узлы, не перезагружая картинки
-          });
-        };
-        const onTile = (id) => {
-          if (!captcha) return;
-          haptic("tap");
-          if (captcha.selected === null) captcha.selected = id;
-          else if (captcha.selected === id) captcha.selected = null;
-          else {
-            const order = captcha.order;
-            const a = order.indexOf(captcha.selected);
-            const b = order.indexOf(id);
-            [order[a], order[b]] = [order[b], order[a]];
-            captcha.selected = null;
-          }
-          draw();
-        };
-        draw();
-
-        const preview = el("figure", "tiles__preview");
-        const sample = new Image();
-        sample.alt = "Образец";
-        sample.src = data.preview;
-        preview.append(sample, el("figcaption", null, "Образец"));
-
-        const wrap = el("div", "tiles");
-        wrap.append(grid, preview);
-        return wrap;
+        captcha = { data };
+        $("captchaHint").textContent = "Передвинь ползунок, чтобы кусочек пазла встал на своё место.";
+        $("captchaBody").replaceChildren(buildPuzzle(data));
       }
 
       function buildPuzzle(data) {
@@ -769,7 +710,6 @@
         if (!captcha) return;
         const body = $("captchaBody");
         body.classList.add("is-busy");
-        $("captchaSubmit").disabled = true;
         try {
           const res = await api("api/join", "POST", { captcha_id: captcha.data.id, answer });
           if (res.status === 422) {
@@ -863,7 +803,6 @@
         $("btnBack").addEventListener("click", () => go("welcome"));
         $("btnGetNumber").addEventListener("click", getNumber);
         $("captchaRefresh").addEventListener("click", startCaptcha);
-        $("captchaSubmit").addEventListener("click", () => captcha && submitCaptcha(captcha.order.slice()));
         document.querySelectorAll("[data-close]").forEach((node) => node.addEventListener("click", closeCaptcha));
         $("btnShowSponsors").addEventListener("click", () => go("sponsors"));
         $("btnClose").addEventListener("click", () => {

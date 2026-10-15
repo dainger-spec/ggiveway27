@@ -8,19 +8,18 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
-    InlineKeyboardMarkup,
     InputMediaPhoto,
     Message,
     ReplyKeyboardRemove,
 )
 
 from .. import captcha, texts
-from ..captcha import CaptchaRateLimited, ChatCaptchaStore, ChatPuzzle
+from ..captcha import CaptchaRateLimited, ChatCaptchaStore, ChatChallenge
 from ..checker import find_missing
 from ..commands import set_admin_commands
 from ..config import Config
 from ..database import Database
-from ..keyboards import CHECK_CB, PuzzleCb, puzzle_kb, sponsors_kb, webapp_kb
+from ..keyboards import CHECK_CB, CaptchaCb, captcha_kb, sponsors_kb, webapp_kb
 from ..utils import show
 
 router = Router(name="user")
@@ -29,7 +28,8 @@ router.message.filter(F.chat.type == ChatType.PRIVATE)
 CHECK_COOLDOWN = 2.0  # секунд между нажатиями «Проверить подписку»
 _last_check: dict[int, float] = {}
 
-TOO_MANY_PUZZLES = "Слишком много попыток. Подожди пару минут и нажми «✅ Проверить подписку» снова."
+TOO_MANY_CAPTCHAS = "Слишком много попыток. Подожди пару минут и нажми «✅ Проверить подписку» снова."
+OUTDATED_CAPTCHA = "Эта картинка устарела. Нажми «✅ Проверить подписку», чтобы получить новую."
 
 
 @router.message(CommandStart())
@@ -96,18 +96,12 @@ async def check_subscriptions(
         await cb.answer("Ещё не все условия выполнены")
         return
 
-    # Подписки проверяли в чате — капча тоже в чате: собрать картинку кнопками под фото.
+    # Подписки проверяли в чате — капча тоже в чате: нажать на число с картинки.
     if await db.get_flag(captcha.SETTING) and not chat_captcha.recently_passed(user.id):
-        try:
-            puzzle = await chat_captcha.issue(user.id)
-        except CaptchaRateLimited:
-            await cb.answer(TOO_MANY_PUZZLES, show_alert=True)
-            return
-        await show(cb, texts.captcha_needed())
-        await bot.send_photo(
-            user.id, await _photo(puzzle), caption=texts.puzzle_caption(), reply_markup=puzzle_kb(puzzle.id, None)
-        )
-        await cb.answer("Остался последний шаг")
+        if issued := await _new_captcha(cb, chat_captcha):
+            await show(cb, texts.captcha_needed())
+            await _send_captcha(cb, issued, edit=False)
+            await cb.answer()
         return
 
     participant, _ = await db.register_participant(user.id, user.username, user.full_name)
@@ -115,32 +109,36 @@ async def check_subscriptions(
     await cb.answer("🎉 Номер получен!")
 
 
-# ---------- Капча в чате: «собери картинку» ----------
+# ---------- Капча в чате: «какое число на картинке» ----------
 
 
-async def _photo(puzzle: ChatPuzzle) -> BufferedInputFile:
-    return BufferedInputFile(await puzzle.render(), filename="puzzle.jpg")
+async def _new_captcha(cb: CallbackQuery, store: ChatCaptchaStore) -> tuple[ChatChallenge, bytes] | None:
+    """Новая капча; если попыток слишком много — говорит об этом и возвращает None."""
+    try:
+        return await store.issue(cb.from_user.id)
+    except CaptchaRateLimited:
+        await cb.answer(TOO_MANY_CAPTCHAS, show_alert=True)
+        return None
 
 
-async def _edit_photo(
-    cb: CallbackQuery, puzzle: ChatPuzzle, caption: str, keyboard: InlineKeyboardMarkup | None
-) -> None:
-    """Меняет картинку в том же сообщении; если не вышло — присылает новое."""
-    photo = await _photo(puzzle)
-    if isinstance(cb.message, Message):
+async def _send_captcha(cb: CallbackQuery, issued: tuple[ChatChallenge, bytes], note: str = "", *, edit: bool) -> None:
+    """Картинка с числами: в том же сообщении (edit) или новым."""
+    challenge, image = issued
+    photo = BufferedInputFile(image, filename="captcha.jpg")
+    caption, keyboard = texts.captcha_caption(note), captcha_kb(challenge.id, challenge.options)
+    if edit and isinstance(cb.message, Message):
         try:
             await cb.message.edit_media(InputMediaPhoto(media=photo, caption=caption), reply_markup=keyboard)
             return
-        except TelegramBadRequest as e:
-            if "message is not modified" in str(e):
-                return
+        except TelegramBadRequest:
+            pass
     await cb.bot.send_photo(cb.from_user.id, photo, caption=caption, reply_markup=keyboard)
 
 
-@router.callback_query(PuzzleCb.filter())
-async def puzzle_pressed(
+@router.callback_query(CaptchaCb.filter())
+async def captcha_pressed(
     cb: CallbackQuery,
-    callback_data: PuzzleCb,
+    callback_data: CaptchaCb,
     bot: Bot,
     db: Database,
     config: Config,
@@ -150,48 +148,34 @@ async def puzzle_pressed(
     if await db.get_participant(user.id) is not None:  # номер уже выдан, например в приложении
         await cb.answer("Ты уже участвуешь — номер выдан ✅", show_alert=True)
         return
-    puzzle = chat_captcha.get(user.id, callback_data.id)
-    if puzzle is None:
-        await cb.answer("Эта картинка устарела. Нажми «✅ Проверить подписку», чтобы получить новую.", show_alert=True)
+    challenge = chat_captcha.get(user.id, callback_data.id)
+    if challenge is None:
+        await cb.answer(OUTDATED_CAPTCHA, show_alert=True)
+        return
+    if callback_data.action == "new" or challenge.expired:
+        if issued := await _new_captcha(cb, chat_captcha):
+            note = "" if callback_data.action == "new" else "⏱ Время вышло — вот новая картинка."
+            await _send_captcha(cb, issued, note, edit=True)
+            await cb.answer()
+        return
+    if not chat_captcha.check(user.id, challenge.id, callback_data.option):
+        if issued := await _new_captcha(cb, chat_captcha):
+            await _send_captcha(cb, issued, "❌ Не то число — вот новая картинка.", edit=True)
+            await cb.answer("Не то число, попробуй ещё раз")
         return
 
-    if callback_data.action == "new" or puzzle.expired:
+    if isinstance(cb.message, Message):
         try:
-            puzzle = await chat_captcha.issue(user.id)
-        except CaptchaRateLimited:
-            await cb.answer(TOO_MANY_PUZZLES, show_alert=True)
-            return
-        note = "" if callback_data.action == "new" else "⏱ Время вышло — вот новая картинка."
-        await _edit_photo(cb, puzzle, texts.puzzle_caption(note), puzzle_kb(puzzle.id, None))
-        await cb.answer("Новая картинка")
-        return
-
-    async with puzzle.lock:  # быстрые нажатия обрабатываем по очереди
-        if chat_captcha.get(user.id, puzzle.id) is not puzzle:  # пока ждали, картинку сменили или собрали
-            await cb.answer()
-            return
-        if not puzzle.tap(callback_data.pos):  # выбрали первый кусочек или сняли выбор
-            if isinstance(cb.message, Message):
-                try:
-                    await cb.message.edit_reply_markup(reply_markup=puzzle_kb(puzzle.id, puzzle.selected))
-                except TelegramBadRequest:
-                    pass
-            await cb.answer("Теперь нажми, с каким кусочком поменять" if puzzle.selected is not None else None)
-            return
-        if not puzzle.solved:
-            await _edit_photo(cb, puzzle, texts.puzzle_caption(), puzzle_kb(puzzle.id, None))
-            await cb.answer()
-            return
-        chat_captcha.solve(user.id)
-        await _edit_photo(cb, puzzle, texts.puzzle_solved(), None)
-
-    # Пока собирал картинку, мог отписаться — проверяем условия ещё раз.
+            await cb.message.edit_caption(caption=texts.captcha_passed(), reply_markup=None)
+        except TelegramBadRequest:
+            pass
+    # Пока отвечал на капчу, мог отписаться — проверяем условия ещё раз.
     sponsors = await db.get_sponsors()
-    missing = await find_missing(bot, db, sponsors, user.id)
     if not sponsors:
         await bot.send_message(user.id, texts.no_sponsors(config.giveaway_name))
         await cb.answer()
         return
+    missing = await find_missing(bot, db, sponsors, user.id)
     if missing:
         await bot.send_message(user.id, texts.missing(missing), reply_markup=sponsors_kb(missing, config.webapp_url))
         await cb.answer("Ещё не все условия выполнены")
@@ -199,6 +183,12 @@ async def puzzle_pressed(
     participant, _ = await db.register_participant(user.id, user.username, user.full_name)
     await bot.send_message(user.id, texts.success(participant.number, config.giveaway_name))
     await cb.answer("🎉 Номер получен!")
+
+
+@router.callback_query(F.data.startswith("pz:"))
+async def old_puzzle_pressed(cb: CallbackQuery) -> None:
+    """Кнопки «собери картинку» из прошлой версии бота."""
+    await cb.answer(OUTDATED_CAPTCHA, show_alert=True)
 
 
 @router.message()

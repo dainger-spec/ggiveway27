@@ -48,10 +48,10 @@ class RecheckCb(CallbackData, prefix="rc"):
     user_id: int
 
 
-class PuzzleCb(CallbackData, prefix="pz"):
-    action: str  # tap | new
+class CaptchaCb(CallbackData, prefix="cc"):
+    action: str  # pick | new
     id: str  # код картинки: кнопки старых картинок не срабатывают
-    pos: int = -1
+    option: int = -1
 
 
 def _sponsor_button_text(s: Sponsor) -> str:
@@ -69,16 +69,13 @@ def webapp_info(webapp_url: str) -> WebAppInfo:
     return WebAppInfo(url=webapp_url + "/")
 
 
-def puzzle_kb(puzzle_id: str, selected: int | None) -> InlineKeyboardMarkup:
-    """Кнопки 3×3 — как клетки на картинке; выбранная подсвечена."""
+def captcha_kb(challenge_id: str, options: list[str]) -> InlineKeyboardMarkup:
+    """Числа под картинкой капчи — по три в ряд — и «Другая картинка»."""
     b = InlineKeyboardBuilder()
-    for pos in range(9):
-        b.button(
-            text=f"🟡 {pos + 1}" if pos == selected else str(pos + 1),
-            callback_data=PuzzleCb(action="tap", id=puzzle_id, pos=pos),
-        )
-    b.button(text="🔄 Другая картинка", callback_data=PuzzleCb(action="new", id=puzzle_id))
-    b.adjust(3, 3, 3, 1)
+    for i, number in enumerate(options):
+        b.button(text=number, callback_data=CaptchaCb(action="pick", id=challenge_id, option=i))
+    b.button(text="🔄 Другая картинка", callback_data=CaptchaCb(action="new", id=challenge_id))
+    b.adjust(3, 3, 1)
     return b.as_markup()
 
 
