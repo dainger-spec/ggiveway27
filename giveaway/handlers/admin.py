@@ -19,8 +19,8 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 
+from .. import captcha, media, texts
 from .. import keyboards as kb
-from .. import media, texts
 from ..checker import bot_is_admin, bot_rights, find_missing
 from ..config import Config
 from ..database import KIND_BOT, KIND_CHANNEL, KIND_CHAT, Database, Sponsor
@@ -531,10 +531,10 @@ async def add_amount_received(message: Message, state: FSMContext, bot: Bot, db:
 
 async def _background_menu(db: Database, config: Config) -> tuple[str, InlineKeyboardMarkup]:
     background = await media.get_background(db, config.media_dir)
-    new_year = await db.get_flag(media.NEW_YEAR)
+    new_year, captcha_on = await db.get_flag(media.NEW_YEAR), await db.get_flag(captcha.SETTING)
     return (
-        texts.appearance_status(background, new_year, config.webapp_url),
-        kb.appearance_kb(background is not None, new_year),
+        texts.appearance_status(background, new_year, captcha_on, config.webapp_url),
+        kb.appearance_kb(background is not None, new_year, captcha_on),
     )
 
 
@@ -545,12 +545,15 @@ async def background_menu(cb: CallbackQuery, state: FSMContext, db: Database, co
     await cb.answer()
 
 
-@router.callback_query(kb.AdminCb.filter(F.action == "new_year"))
-async def toggle_new_year(cb: CallbackQuery, db: Database, config: Config) -> None:
-    enabled = not await db.get_flag(media.NEW_YEAR)
-    await db.set_settings({media.NEW_YEAR: "1" if enabled else "0"})
+@router.callback_query(kb.AdminCb.filter(F.action.in_({"new_year", "captcha"})))
+async def toggle_setting(cb: CallbackQuery, callback_data: kb.AdminCb, db: Database, config: Config) -> None:
+    key, name = (
+        (media.NEW_YEAR, "Новогодняя тема") if callback_data.action == "new_year" else (captcha.SETTING, "Капча")
+    )
+    enabled = not await db.get_flag(key)
+    await db.set_settings({key: "1" if enabled else "0"})
     await show(cb, *await _background_menu(db, config))
-    await cb.answer(f"Новогодняя тема: {'включена' if enabled else 'выключена'}")
+    await cb.answer(f"{name}: {'включена' if enabled else 'выключена'}")
 
 
 @router.callback_query(kb.AdminCb.filter(F.action == "bg_upload"))

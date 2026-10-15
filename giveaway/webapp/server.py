@@ -10,7 +10,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.utils.web_app import WebAppUser, safe_parse_webapp_init_data
 from aiohttp import web
 
-from .. import media, texts
+from .. import captcha, media, texts
 from ..checker import find_missing
 from ..config import Config
 from ..database import Database, Sponsor
@@ -27,6 +27,7 @@ DB = web.AppKey("db", Database)
 CONFIG = web.AppKey("config", Config)
 CHECK_CACHE = web.AppKey("check_cache", dict)
 ASSET_VERSION = web.AppKey("asset_version", str)
+CAPTCHA = web.AppKey("captcha", captcha.CaptchaStore)
 
 
 def _auth_user(request: web.Request) -> WebAppUser:
@@ -91,6 +92,7 @@ async def _state(app: web.Application, user: WebAppUser, *, fresh: bool = False)
         ],
         "can_join": bool(sponsors) and not missing,
         "theme": {"new_year": await db.get_flag(media.NEW_YEAR)},
+        "captcha": await db.get_flag(captcha.SETTING),
     }
 
 
@@ -108,16 +110,51 @@ async def api_state(request: web.Request) -> web.Response:
     return web.json_response(await _state(request.app, user))
 
 
+async def _conditions_met(app: web.Application, user_id: int) -> bool:
+    sponsors = await app[DB].get_sponsors()
+    return bool(sponsors) and not await _missing_ids(app, user_id, sponsors, fresh=True)
+
+
+async def api_captcha(request: web.Request) -> web.Response:
+    """Новая капча — только когда все условия уже выполнены."""
+    user = _auth_user(request)
+    app = request.app
+    if await app[DB].get_participant(user.id) is not None or not await _conditions_met(app, user.id):
+        return web.json_response(await _state(app, user), status=409)
+    try:
+        challenge = await app[CAPTCHA].issue(user.id)
+    except captcha.CaptchaRateLimited:
+        return web.json_response({"error": "Слишком много попыток. Подожди пару минут и попробуй снова."}, status=429)
+    return web.json_response(challenge)
+
+
+async def captcha_file(request: web.Request) -> web.Response:
+    data = request.app[CAPTCHA].file(request.match_info["cid"], request.match_info["name"])
+    if data is None:
+        raise web.HTTPNotFound()
+    return web.Response(body=data, content_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+
+
 async def api_join(request: web.Request) -> web.Response:
-    """Выдаёт номер, если все каналы и чаты выполнены. 409 — если ещё нет."""
+    """Выдаёт номер, если все каналы и чаты выполнены и пройдена капча.
+
+    409 — условия не выполнены, 422 — капча не пройдена (нужно получить новую).
+    """
     user = _auth_user(request)
     app = request.app
     db, bot, config = app[DB], app[BOT], app[CONFIG]
 
     if await db.get_participant(user.id) is None:
-        sponsors = await db.get_sponsors()
-        if not sponsors or await _missing_ids(app, user.id, sponsors, fresh=True):
+        if not await _conditions_met(app, user.id):
             return web.json_response(await _state(app, user), status=409)
+        if await db.get_flag(captcha.SETTING):
+            try:
+                body = await request.json()
+            except ValueError:
+                body = {}
+            body = body if isinstance(body, dict) else {}
+            if not app[CAPTCHA].verify(user.id, str(body.get("captcha_id", "")), body.get("answer")):
+                return web.json_response({"error": "captcha"}, status=422)
         full_name = " ".join(filter(None, (user.first_name, user.last_name)))
         participant, created = await db.register_participant(user.id, user.username, full_name)
         if created:
@@ -168,12 +205,15 @@ def create_app(bot: Bot, db: Database, config: Config) -> web.Application:
     app = web.Application()
     app[BOT], app[DB], app[CONFIG] = bot, db, config
     app[CHECK_CACHE] = {}
+    app[CAPTCHA] = captcha.CaptchaStore()
     app[ASSET_VERSION] = str(int(max(p.stat().st_mtime for p in STATIC_DIR.iterdir())))
 
     app.router.add_get("/", index)
     app.router.add_get("/health", health)
     app.router.add_get("/api/state", api_state)
     app.router.add_post("/api/join", api_join)
+    app.router.add_post("/api/captcha", api_captcha)
+    app.router.add_get("/captcha/{cid}/{name}.png", captcha_file)
     app.router.add_get("/media/background", media_background)
     app.router.add_get("/media/avatar/{sponsor_id}", media_avatar)
     app.router.add_get("/media/sponsor/{sponsor_id}", media_sponsor_background)

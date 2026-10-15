@@ -6,12 +6,12 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
-from .. import texts
+from .. import captcha, texts
 from ..checker import find_missing
 from ..commands import set_admin_commands
 from ..config import Config
 from ..database import Database
-from ..keyboards import CHECK_CB, sponsors_kb, webapp_kb
+from ..keyboards import CHECK_CB, captcha_kb, sponsors_kb, webapp_kb
 from ..utils import show
 
 router = Router(name="user")
@@ -73,6 +73,12 @@ async def check_subscriptions(cb: CallbackQuery, bot: Bot, db: Database, config:
     if missing:
         await show(cb, texts.missing(missing), sponsors_kb(missing, config.webapp_url))
         await cb.answer("Ещё не все условия выполнены")
+        return
+
+    # Капча проходится в мини-приложении; без него номер выдаётся сразу.
+    if config.webapp_url and await db.get_flag(captcha.SETTING):
+        await show(cb, texts.captcha_needed(), captcha_kb(config.webapp_url))
+        await cb.answer("Остался последний шаг")
         return
 
     participant, _ = await db.register_participant(user.id, user.username, user.full_name)

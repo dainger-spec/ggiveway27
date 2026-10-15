@@ -82,6 +82,25 @@
     </section>
   </main>
 
+  <!-- Капча перед выдачей номера -->
+  <div class="sheet" id="captchaSheet" hidden>
+    <div class="sheet__backdrop" data-close></div>
+    <div class="sheet__panel" role="dialog" aria-modal="true" aria-labelledby="captchaTitle">
+      <div class="sheet__head">
+        <h3 class="sheet__title" id="captchaTitle">Последний шаг</h3>
+        <button class="sheet__close" type="button" data-close aria-label="Закрыть">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="sheet__text" id="captchaHint">Докажи, что ты не бот.</p>
+      <div class="captcha" id="captchaBody"></div>
+      <div class="sheet__actions" id="captchaActions">
+        <button class="cta cta--ghost" id="captchaRefresh" type="button">Другая картинка</button>
+        <button class="cta" id="captchaSubmit" type="button">Готово</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
@@ -198,10 +217,13 @@
 
       // ---------- API ----------
 
-      async function api(path, method = "GET") {
+      async function api(path, method = "GET", data = null) {
+        const headers = { Authorization: "tma " + initData };
+        if (data) headers["Content-Type"] = "application/json";
         const res = await fetch(path, {
           method,
-          headers: { Authorization: "tma " + initData },
+          headers,
+          body: data ? JSON.stringify(data) : undefined,
           cache: "no-store",
         });
         const text = await res.text();
@@ -211,7 +233,7 @@
         } catch (_) {
           /* ответ не JSON — это текст ошибки */
         }
-        if (!res.ok && res.status !== 409) {
+        if (!res.ok && ![409, 422, 429].includes(res.status)) {
           const error = new Error(body ? "Ошибка сервера" : text || "Ошибка сервера");
           error.status = res.status;
           throw error;
@@ -225,6 +247,11 @@
         try {
           const { body } = await api("api/state");
           setState(body);
+          const fromChat = new URLSearchParams(location.search).has("captcha");
+          if (fromChat && body.captcha && body.can_join && !body.participant) {
+            go("sponsors");
+            startCaptcha();
+          }
         } catch (e) {
           if (e.status === 401) toast(e.message);
         } finally {
@@ -579,6 +606,11 @@
           showDone(state.participant.number, false);
           return;
         }
+        if (state.captcha) {
+          haptic("tap");
+          startCaptcha();
+          return;
+        }
         const btn = $("btnGetNumber");
         btn.disabled = true;
         btn.replaceChildren(el("span", "spinner"), " Проверяем подписки");
@@ -601,6 +633,178 @@
         } catch (e) {
           toast(e.message || "Не получилось, попробуй ещё раз");
           renderSponsors();
+        }
+      }
+
+      // ---------- Капча ----------
+
+      let captcha = null; // { data, order, selected }
+
+      function captchaOpen() {
+        return !$("captchaSheet").hidden;
+      }
+
+      function closeCaptcha() {
+        $("captchaSheet").hidden = true;
+        document.documentElement.classList.remove("sheet-open");
+        captcha = null;
+      }
+
+      async function startCaptcha() {
+        $("captchaSheet").hidden = false;
+        document.documentElement.classList.add("sheet-open");
+        $("captchaHint").textContent = "Докажи, что ты не бот — и номер твой.";
+        $("captchaSubmit").hidden = true;
+        $("captchaActions").classList.add("is-single");
+        $("captchaBody").replaceChildren(el("div", "captcha__loading", "Загружаем картинку…"));
+        try {
+          const { status, body } = await api("api/captcha", "POST");
+          if (status === 409) {
+            closeCaptcha();
+            setState(body);
+            if (body.participant) showDone(body.participant.number, false);
+            else toast("Ещё не все подписки — проверь спонсоров без галочки");
+            return;
+          }
+          if (status === 429) {
+            closeCaptcha();
+            toast(body.error);
+            return;
+          }
+          renderCaptcha(body);
+        } catch (e) {
+          closeCaptcha();
+          toast(e.message || "Не удалось загрузить проверку");
+        }
+      }
+
+      function renderCaptcha(data) {
+        const tiles = data.kind === "tiles";
+        captcha = { data, order: tiles ? data.tiles.map((t) => t.id) : null, selected: null };
+        $("captchaHint").textContent = tiles
+          ? "Собери картинку по образцу: нажимай на два кусочка, чтобы поменять их местами."
+          : "Передвинь ползунок, чтобы кусочек пазла встал на своё место.";
+        $("captchaSubmit").hidden = !tiles;
+        $("captchaSubmit").disabled = false;
+        $("captchaActions").classList.toggle("is-single", !tiles);
+        $("captchaBody").replaceChildren(tiles ? buildTiles(data) : buildPuzzle(data));
+      }
+
+      function buildTiles(data) {
+        const grid = el("div", "tiles__grid");
+        grid.style.setProperty("--grid", data.grid);
+        const buttons = new Map();
+        for (const tile of data.tiles) {
+          const btn = el("button", "tile");
+          btn.type = "button";
+          const img = new Image();
+          img.alt = "";
+          img.draggable = false;
+          img.src = tile.url;
+          btn.append(img);
+          btn.addEventListener("click", () => onTile(tile.id));
+          buttons.set(tile.id, btn);
+        }
+        const draw = () => {
+          captcha.order.forEach((id, i) => {
+            const btn = buttons.get(id);
+            btn.classList.toggle("is-selected", id === captcha.selected);
+            btn.setAttribute("aria-label", `Кусочек на месте ${i + 1}`);
+            grid.append(btn); // переставляем узлы, не перезагружая картинки
+          });
+        };
+        const onTile = (id) => {
+          if (!captcha) return;
+          haptic("tap");
+          if (captcha.selected === null) captcha.selected = id;
+          else if (captcha.selected === id) captcha.selected = null;
+          else {
+            const order = captcha.order;
+            const a = order.indexOf(captcha.selected);
+            const b = order.indexOf(id);
+            [order[a], order[b]] = [order[b], order[a]];
+            captcha.selected = null;
+          }
+          draw();
+        };
+        draw();
+
+        const preview = el("figure", "tiles__preview");
+        const sample = new Image();
+        sample.alt = "Образец";
+        sample.src = data.preview;
+        preview.append(sample, el("figcaption", null, "Образец"));
+
+        const wrap = el("div", "tiles");
+        wrap.append(grid, preview);
+        return wrap;
+      }
+
+      function buildPuzzle(data) {
+        const frame = el("div", "puzzle__frame");
+        frame.style.aspectRatio = `${data.width} / ${data.height}`;
+        const bg = new Image();
+        bg.className = "puzzle__bg";
+        bg.alt = "";
+        bg.draggable = false;
+        bg.src = data.background;
+        const piece = new Image();
+        piece.className = "puzzle__piece";
+        piece.alt = "";
+        piece.draggable = false;
+        piece.src = data.piece.url;
+        piece.style.width = `${(data.piece.width / data.width) * 100}%`;
+        piece.style.top = `${(data.piece.y / data.height) * 100}%`;
+        piece.style.left = "0%";
+        frame.append(bg, piece);
+
+        const range = document.createElement("input");
+        range.type = "range";
+        range.className = "puzzle__range";
+        range.min = "0";
+        range.max = String(data.max);
+        range.step = "1";
+        range.value = "0";
+        range.setAttribute("aria-label", "Положение кусочка пазла");
+        range.addEventListener("input", () => {
+          piece.style.left = `${(Number(range.value) / data.width) * 100}%`;
+        });
+        range.addEventListener("change", () => submitCaptcha(Number(range.value)));
+
+        const wrap = el("div", "puzzle");
+        wrap.append(frame, range);
+        return wrap;
+      }
+
+      async function submitCaptcha(answer) {
+        if (!captcha) return;
+        const body = $("captchaBody");
+        body.classList.add("is-busy");
+        $("captchaSubmit").disabled = true;
+        try {
+          const res = await api("api/join", "POST", { captcha_id: captcha.data.id, answer });
+          if (res.status === 422) {
+            haptic("error");
+            const panel = document.querySelector(".sheet__panel");
+            panel.classList.remove("is-shake");
+            void panel.offsetWidth;
+            panel.classList.add("is-shake");
+            toast("Не совсем так — вот новая картинка");
+            await startCaptcha();
+            return;
+          }
+          closeCaptcha();
+          setState(res.body);
+          if (res.status === 409 || !res.body.participant) {
+            toast("Ещё не все подписки — проверь спонсоров без галочки");
+            return;
+          }
+          showDone(res.body.participant.number, true);
+        } catch (e) {
+          toast(e.message || "Не получилось, попробуй ещё раз");
+          await startCaptcha();
+        } finally {
+          body.classList.remove("is-busy");
         }
       }
 
@@ -659,7 +863,7 @@
             /* метод не поддерживается этой версией Telegram */
           }
         }
-        tg.BackButton.onClick(() => go("welcome"));
+        tg.BackButton.onClick(() => (captchaOpen() ? closeCaptcha() : go("welcome")));
         tg.onEvent("activated", onReturn);
       }
 
@@ -670,6 +874,9 @@
         });
         $("btnBack").addEventListener("click", () => go("welcome"));
         $("btnGetNumber").addEventListener("click", getNumber);
+        $("captchaRefresh").addEventListener("click", startCaptcha);
+        $("captchaSubmit").addEventListener("click", () => captcha && submitCaptcha(captcha.order.slice()));
+        document.querySelectorAll("[data-close]").forEach((node) => node.addEventListener("click", closeCaptcha));
         $("btnShowSponsors").addEventListener("click", () => go("sponsors"));
         $("btnClose").addEventListener("click", () => {
           if (tg && initData) tg.close();
@@ -694,6 +901,11 @@
         try {
           const { body } = await api("api/state");
           setState(body);
+          const fromChat = new URLSearchParams(location.search).has("captcha");
+          if (fromChat && body.captcha && body.can_join && !body.participant) {
+            go("sponsors");
+            startCaptcha();
+          }
         } catch (e) {
           $("prizeTotal").classList.remove("is-loading");
           $("prizeTotal").textContent = "—";

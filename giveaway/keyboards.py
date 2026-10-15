@@ -22,7 +22,7 @@ REMOVE_AMOUNT_TEXT = "🚫 Убрать сумму"
 
 
 class AdminCb(CallbackData, prefix="adm"):
-    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | new_year
+    action: str  # menu | sponsors | add | find | export | bg | bg_upload | bg_delete | new_year | captcha
 
 
 class KindCb(CallbackData, prefix="kind"):  # только чтобы старые кнопки «Канал/Чат/Бот» не зависали
@@ -61,6 +61,12 @@ def webapp_info(webapp_url: str) -> WebAppInfo:
     return WebAppInfo(url=webapp_url + "/")
 
 
+def captcha_kb(webapp_url: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🧩 Пройти проверку", web_app=WebAppInfo(url=webapp_url + "/?captcha=1"))
+    return b.as_markup()
+
+
 def webapp_kb(webapp_url: str | None) -> InlineKeyboardMarkup | None:
     if not webapp_url:
         return None
@@ -90,12 +96,12 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     b.button(text="👥 Участники", callback_data=PageCb(page=0))
     b.button(text="🔎 Найти участника", callback_data=AdminCb(action="find"))
     b.button(text="📥 Выгрузить участников (CSV)", callback_data=AdminCb(action="export"))
-    b.button(text="🎨 Оформление приложения", callback_data=AdminCb(action="bg"))
+    b.button(text="⚙️ Настройки приложения", callback_data=AdminCb(action="bg"))
     b.adjust(2, 2, 1, 1)
     return b.as_markup()
 
 
-def appearance_kb(has_background: bool, new_year: bool) -> InlineKeyboardMarkup:
+def appearance_kb(has_background: bool, new_year: bool, captcha: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(
         text="📤 Загрузить новый фон" if has_background else "📤 Загрузить фон",
@@ -107,6 +113,7 @@ def appearance_kb(has_background: bool, new_year: bool) -> InlineKeyboardMarkup:
         text="🎄 Выключить новогоднюю тему" if new_year else "🎄 Включить новогоднюю тему",
         callback_data=AdminCb(action="new_year"),
     )
+    b.button(text="🧩 Выключить капчу" if captcha else "🧩 Включить капчу", callback_data=AdminCb(action="captcha"))
     b.button(text="« В меню", callback_data=AdminCb(action="menu"))
     b.adjust(1)
     return b.as_markup()
